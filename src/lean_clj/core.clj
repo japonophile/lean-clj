@@ -15,19 +15,24 @@
 
 (def read-file)
 
+(defn- load-include-once
+  "load included file if it has not been included before"
+  [text include-stmt filename included-files]
+  (if (some #{filename} included-files)
+    [(clojure.string/replace text include-stmt "") included-files]
+    (let [[text-to-include updated-included-files]
+          (read-file filename (conj included-files filename))]
+      [(clojure.string/replace text include-stmt text-to-include) updated-included-files])))
+
 (defn load-includes
-  "load includes"
+  "load included files"
   [text included-files]
   (let [m (re-find #"(\$\[ (\S+) \$\])" text)]
     (if m
       (let [include-stmt (get m 1)
             filename (get m 2)]
-        (apply load-includes
-               (if (some #{filename} included-files)
-                 [(clojure.string/replace text include-stmt "") included-files]
-                 (let [[text-to-include updated-included-files]
-                       (read-file filename (conj included-files filename))]
-                   [(clojure.string/replace text include-stmt text-to-include) updated-included-files]))))
+        (apply load-includes  ; call recursively to load multiple includes in one file
+               (load-include-once text include-stmt filename included-files)))
       [text included-files])))
 
 (defn read-file

@@ -14,11 +14,18 @@
 (deftest test-load-includes
   (with-redefs [slurp (fn [filename]
                         (case filename
+                          "abc.mm" "ABC"
                           "xyz.mm" "XYZ"
                           "xyz-comment.mm" "XYZ $( comment $) ZYX"
+                          "xyz-include.mm" "XYZ $[ abc.mm $] ZYX"
+                          "xyz-include2.mm" "XYZ $[ abc.mm $] $[ root.mm $] ZYX"
                           "root.mm" "this is meta"))]
     (testing "load includes"
-      (is (= "abc XYZ def" (load-includes "abc $[ xyz.mm $] def" ["root.mm"])))
-      (is (= "abc XYZ  ZYX def" (load-includes "abc $[ xyz-comment.mm $] def" ["root.mm"]))))
-    (testing "no self inclusion"
-      (is (thrown? Exception (load-includes "abc $[ root.mm $] def" ["root.mm"]))))))
+      (is (= "abc XYZ def"          (first (load-includes "abc $[ xyz.mm $] def" ["root.mm"]))))
+      (is (= "abc XYZ  ZYX def"     (first (load-includes "abc $[ xyz-comment.mm $] def" ["root.mm"])))))
+    (testing "nested inclusion"
+      (is (= "abc XYZ ABC ZYX def"  (first (load-includes "abc $[ xyz-include.mm $] def" ["root.mm"]))))
+      (is (= "abc XYZ ABC  ZYX def" (first (load-includes "abc $[ xyz-include2.mm $] def" ["root.mm"])))))
+    (testing "no multiple inclusion"
+      (is (= "abc  def"             (first (load-includes "abc $[ root.mm $] def" ["root.mm"]))))
+      (is (= "abc XYZ ABC ZYX def " (first (load-includes "abc $[ xyz-include.mm $] def $[ abc.mm $]" ["root.mm"])))))))

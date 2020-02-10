@@ -17,21 +17,25 @@
 
 (defn load-includes
   "load includes"
-  [text include-tree]
-  (let [m (re-matches #".*(\$\[ (\S+) \$\]).*" text)]
+  [text included-files]
+  (let [m (re-find #"(\$\[ (\S+) \$\])" text)]
     (if m
-      (let [filename (get m 2)]
-        (if (some #{filename} include-tree)
-          (throw (Exception. "Include loop detected"))
-          (clojure.string/replace text (get m 1) (read-file filename (conj include-tree filename)))))
-      text)))
+      (let [include-stmt (get m 1)
+            filename (get m 2)]
+        (apply load-includes
+               (if (some #{filename} included-files)
+                 [(clojure.string/replace text include-stmt "") included-files]
+                 (let [[text-to-include updated-included-files]
+                       (read-file filename (conj included-files filename))]
+                   [(clojure.string/replace text include-stmt text-to-include) updated-included-files]))))
+      [text included-files])))
 
 (defn read-file
   "read metamath file"
   ([filename]
-   (read-file filename [filename]))
-  ([filename include-tree]
-   (load-includes (strip-comments (slurp filename)) include-tree)))
+   (first (read-file filename [filename])))
+  ([filename included-files]
+   (load-includes (strip-comments (slurp filename)) included-files)))
 
 (defn parse-mm
   "some help"

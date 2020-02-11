@@ -1,31 +1,53 @@
 (ns lean-clj.core-test
   (:require
     [lean-clj.core :refer :all]
-    [clojure.test :refer [deftest testing is]]))
+    [clojure.test :refer [deftest testing is]])
+  ; (:import
+  ;   [lean-clj ParseException])
+  )
 
 (deftest test-strip-comments
-  (testing "strip comments"
-    (is (= "abc  def" (strip-comments "abc $( comment $) def")))
-    (is (= "abc  def  hij" (strip-comments "abc $( first comment $) def $( second comment $) hij")))
-    (is (= "abc  def" (strip-comments "abc $( multiline \ncomment $) def")))
-    (is (thrown? Exception (strip-comments "abc $( unfinished comment")))
-    (is (thrown? Exception (strip-comments "$) abc $( finished comment $)")))))
+  (testing "The token $( begins a comment and $) ends a comment.
+           Comments are ignored (treated like white space) for the purpose of parsing."
+    (is (= "$c wff $.\n\n$v x $.\n"    (strip-comments "$c wff $.\n$( comment $)\n$v x $.\n")))
+    (is (= "$c wff $.\n\n$v x $.\n\nax1 $a x $.\n"
+           (strip-comments "$c wff $.\n$( first comment $)\n$v x $.\n$( second comment $)\nax1 $a x $.\n")))
+    (is (= "$c wff $.\n\n$v x $.\n"    (strip-comments "$c wff $.\n$( multiline \ncomment $)\n$v x $.\n")))
+    (is (thrown? Exception (strip-comments "$c wff $.\n$( unfinished comment")))
+    (is (thrown? Exception (strip-comments "$c wff $.\n$) $v x $.\n$( finished comment $)\n"))))
+  (testing "$( $[ $) is a comment"
+    (is (= "$c wff $.\n\n$v x $.\n"    (strip-comments "$c wff $.\n$( $[ $)\n$v x $.\n"))))
+  (testing "they may not contain the 2-character sequences $( or $) (comments do not nest)"
+    (is (thrown? Exception (strip-comments "$c wff $.\n$( comment $( nested comment, illegal $) $)\n$v x $.\n")))))
 
 (deftest test-load-includes
-  (with-redefs [slurp (fn [filename]
-                        (case filename
-                          "abc.mm" "ABC"
-                          "xyz.mm" "XYZ"
-                          "xyz-comment.mm" "XYZ $( comment $) ZYX"
-                          "xyz-include.mm" "XYZ $[ abc.mm $] ZYX"
-                          "xyz-include2.mm" "XYZ $[ abc.mm $] $[ root.mm $] ZYX"
-                          "root.mm" "this is meta"))]
-    (testing "load includes"
-      (is (= "abc XYZ def"          (first (load-includes "abc $[ xyz.mm $] def" ["root.mm"]))))
-      (is (= "abc XYZ  ZYX def"     (first (load-includes "abc $[ xyz-comment.mm $] def" ["root.mm"])))))
-    (testing "nested inclusion"
-      (is (= "abc XYZ ABC ZYX def"  (first (load-includes "abc $[ xyz-include.mm $] def" ["root.mm"]))))
-      (is (= "abc XYZ ABC  ZYX def" (first (load-includes "abc $[ xyz-include2.mm $] def" ["root.mm"])))))
-    (testing "no multiple inclusion"
-      (is (= "abc  def"             (first (load-includes "abc $[ root.mm $] def" ["root.mm"]))))
-      (is (= "abc XYZ ABC ZYX def " (first (load-includes "abc $[ xyz-include.mm $] def $[ abc.mm $]" ["root.mm"])))))))
+  (let [slurp-original slurp
+        slurp-mocked   (fn [filename]
+                         (case filename
+                           ; filename       ; file content
+                           "abc.mm"           "$c a b c $.\n"
+                           "xyz.mm"           "$v x y z $.\n"
+                           "xyz-comment.mm"   "$c wff $.\n$( comment $)\n$v x y z $.\n"
+                           "xyz-include.mm"   "$c wff $.\n$[ abc.mm $]\n$v x y z $.\n"
+                           "xyz-include2.mm"  "$c wff $.\n$[ abc.mm $]\n$[ root.mm $]\n$v x y z $.\n"
+                           "wrong-include.mm" "$c a $.\n${ $[ xyz.mm $] $}\n$v n $.\n"
+                           "root.mm"          "this file should not be read"
+                           (slurp-original filename)))]
+    (with-redefs [slurp slurp-mocked]
+      (testing "A file inclusion command consists of $[ followed by a file name followed by $]."
+        (is (= "$c a $.\n$v x y z $.\n\n$v n $.\n"
+               (first (load-includes "$c a $.\n$[ xyz.mm $]\n$v n $.\n" ["root.mm"]))))
+        (is (= "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n"
+               (first (load-includes "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n" ["root.mm"])))))
+      (testing "It is only allowed in the outermost scope (i.e., not between ${ and $})"
+        (is (thrown? Exception (load-includes "$[ wrong-include.mm $]\n" ["root.mm"]))))
+      (testing "nested inclusion"
+        (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n"
+               (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n" ["root.mm"]))))
+        (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n\n$v x y z $.\n\n$v n $.\n"
+               (first (load-includes "$c a $.\n$[ xyz-include2.mm $]\n$v n $.\n" ["root.mm"])))))
+      (testing "no multiple inclusion"
+        (is (= "$c a $.\n\n$v n $.\n"
+               (first (load-includes "$c a $.\n$[ root.mm $]\n$v n $.\n" ["root.mm"]))))
+        (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n\n"
+               (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n$[ abc.mm $]\n" ["root.mm"]))))))))

@@ -1,6 +1,7 @@
 (set-env!
   :resource-paths #{"src"}
   :source-paths #{"test"}
+  :java-source-paths #{"src"}
   :dependencies '[[org.clojure/clojure "1.10.1"]
                   [instaparse "1.4.10"]
                   [adzerk/boot-test "1.2.0" :scope "test"]])
@@ -14,9 +15,12 @@
 (deftask build
   "Build my project."
   []
-  (comp (pom) (jar) (install)))
+  (comp (javac) (pom) (jar) (install)))
 
 (require 'lean-clj.core)
-(deftask run []
+; (deftask run []
+;   (lean-clj.core/-main "aaa"))
+(deftask run
+  [a args ARG [str] "The argument vector"]
   (with-pass-thru _
-    (lean-clj.core/-main)))
+    (apply lean-clj.core/-main args)))

@@ -1,17 +1,32 @@
 (ns lean-clj.core
   (:require
-    [clojure.string :refer [index-of]]))
+    [clojure.string :refer [index-of includes?]]
+    [clojure.java.io :as io]
+    [instaparse.core :as insta])
+  (:import
+    instaparse.gll.Failure
+    ; lean-clj.ParseException
+    ))
 
 (defn strip-comments
   "strip comments"
   [text]
-  (let [start (index-of text "$(")]
-    (if start
-      (let [end (index-of text "$)")]
-        (if (> end start)
+  (if-let [start (index-of text "$(")]
+    (let [end (index-of text "$)")]
+      (if (> end start)
+        (if (not (includes? (subs text (+ 2 start) end) "$("))
           (str (subs text 0 start) (strip-comments (subs text (+ 2 end))))
-          (throw (Exception. "Malformed comment"))))
-      text)))
+          (throw (Exception. "Comments may not be nested")))
+        (throw (Exception. "Malformed comment"))))
+    text))
+
+(defn- check-grammar
+  "parse metamath program"
+  [program]
+  (let [result ((insta/parser (io/resource "lean_clj/mm.bnf")) program)]
+    (if (instance? instaparse.gll.Failure result)
+      (throw (Exception. (str (:reason result))))
+      program)))
 
 (def read-file)
 
@@ -40,7 +55,8 @@
   ([filename]
    (first (read-file filename [filename])))
   ([filename included-files]
-   (load-includes (strip-comments (slurp filename)) included-files)))
+   (let [program (check-grammar (strip-comments (slurp filename)))]
+     (load-includes program included-files))))
 
 (defn parse-mm
   "some help"

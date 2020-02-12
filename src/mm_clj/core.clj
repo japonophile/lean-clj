@@ -19,10 +19,12 @@
         (throw (ParseException. "Malformed comment"))))
     text))
 
+(def mm-parser (insta/parser (io/resource "mm_clj/mm.bnf")))
+
 (defn- check-grammar
   "parse metamath program"
   [program]
-  (let [result ((insta/parser (io/resource "mm_clj/mm.bnf")) program)]
+  (let [result (mm-parser program)]
     (if (instance? instaparse.gll.Failure result)
       (throw (ParseException. (str (:reason result))))
       program)))
@@ -57,10 +59,36 @@
    (let [program (check-grammar (strip-comments (slurp filename)))]
      (load-includes program included-files))))
 
+(defrecord State [constants variables])
+
+(defn- add-constant
+  "add constant to state"
+  [children state]
+  (let [_ (assert (= 1 (count children)))
+        c (first children)]
+    (if (some #{c} (:constants state))
+      (throw (ParseException. (str "Constant " c " was already defined before")))
+      (assoc state :constants (conj (:constants state) (first children))))))
+
+(defn traverse
+  "traverse a parse tree"
+  [tree state]
+  ; (println state)
+  (let [[node-type & children] tree]
+    (case node-type
+      :constant (add-constant children state)
+      (reduce #(traverse %2 %1) state children))))
+
+(defn parse-mm-program
+  "parse a metamath program"
+  [program]
+  (let [tree (mm-parser program)]
+    (println (traverse tree (State. #{} #{})))))
+
 (defn parse-mm
-  "some help"
+  "parse a metamath file"
   [filename]
-  (read-file filename))
+  (parse-mm-program (read-file filename)))
 
 (defn -main
   "LEAN clojure"

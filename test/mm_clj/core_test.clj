@@ -1,10 +1,9 @@
 (ns mm-clj.core-test
   (:require
     [mm-clj.core :refer :all]
-    [clojure.test :refer [deftest testing is]])
+    [clojure.test :refer :all])
   (:import
-    [mm-clj ParseException])
-  )
+    [mm-clj ParseException]))
 
 (deftest test-strip-comments
   (testing "The token $( begins a comment and $) ends a comment.
@@ -51,3 +50,8 @@
                (first (load-includes "$c a $.\n$[ root.mm $]\n$v n $.\n" ["root.mm"]))))
         (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n\n"
                (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n$[ abc.mm $]\n" ["root.mm"]))))))))
+
+(deftest variables-and-constants
+  (testing "The same math symbol may not occur twice in a given $v or $c statement"
+    (is (thrown? ParseException (parse-mm-program "$c c c $.\n")))))
+

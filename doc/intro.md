@@ -1,3 +1,3 @@
-# Introduction to lean-clj
+# Introduction to mm-clj
 
 TODO: write [great documentation](http://jacobian.org/writing/what-to-write/)

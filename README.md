@@ -1,4 +1,4 @@
-# lean-clj
+# mm-clj
 
 A metamath parser written in Clojure
 

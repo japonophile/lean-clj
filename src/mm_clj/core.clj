@@ -1,11 +1,11 @@
-(ns lean-clj.core
+(ns mm-clj.core
   (:require
     [clojure.string :refer [index-of includes?]]
     [clojure.java.io :as io]
     [instaparse.core :as insta])
   (:import
     instaparse.gll.Failure
-    lean-clj.ParseException))
+    mm-clj.ParseException))
 
 (defn strip-comments
   "strip comments"
@@ -22,7 +22,7 @@
 (defn- check-grammar
   "parse metamath program"
   [program]
-  (let [result ((insta/parser (io/resource "lean_clj/mm.bnf")) program)]
+  (let [result ((insta/parser (io/resource "mm_clj/mm.bnf")) program)]
     (if (instance? instaparse.gll.Failure result)
       (throw (ParseException. (str (:reason result))))
       program)))

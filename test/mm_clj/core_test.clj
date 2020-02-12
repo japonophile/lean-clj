@@ -1,9 +1,9 @@
-(ns lean-clj.core-test
+(ns mm-clj.core-test
   (:require
-    [lean-clj.core :refer :all]
+    [mm-clj.core :refer :all]
     [clojure.test :refer [deftest testing is]])
   (:import
-    [lean-clj ParseException])
+    [mm-clj ParseException])
   )
 
 (deftest test-strip-comments

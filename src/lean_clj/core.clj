@@ -5,19 +5,18 @@
     [instaparse.core :as insta])
   (:import
     instaparse.gll.Failure
-    ; lean-clj.ParseException
-    ))
+    lean-clj.ParseException))
 
 (defn strip-comments
   "strip comments"
   [text]
   (if-let [start (index-of text "$(")]
     (let [end (index-of text "$)")]
-      (if (> end start)
+      (if (and end (> end start))
         (if (not (includes? (subs text (+ 2 start) end) "$("))
           (str (subs text 0 start) (strip-comments (subs text (+ 2 end))))
-          (throw (Exception. "Comments may not be nested")))
-        (throw (Exception. "Malformed comment"))))
+          (throw (ParseException. "Comments may not be nested")))
+        (throw (ParseException. "Malformed comment"))))
     text))
 
 (defn- check-grammar
@@ -25,7 +24,7 @@
   [program]
   (let [result ((insta/parser (io/resource "lean_clj/mm.bnf")) program)]
     (if (instance? instaparse.gll.Failure result)
-      (throw (Exception. (str (:reason result))))
+      (throw (ParseException. (str (:reason result))))
       program)))
 
 (def read-file)

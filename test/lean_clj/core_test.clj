@@ -2,8 +2,8 @@
   (:require
     [lean-clj.core :refer :all]
     [clojure.test :refer [deftest testing is]])
-  ; (:import
-  ;   [lean-clj ParseException])
+  (:import
+    [lean-clj ParseException])
   )
 
 (deftest test-strip-comments
@@ -13,12 +13,12 @@
     (is (= "$c wff $.\n\n$v x $.\n\nax1 $a x $.\n"
            (strip-comments "$c wff $.\n$( first comment $)\n$v x $.\n$( second comment $)\nax1 $a x $.\n")))
     (is (= "$c wff $.\n\n$v x $.\n"    (strip-comments "$c wff $.\n$( multiline \ncomment $)\n$v x $.\n")))
-    (is (thrown? Exception (strip-comments "$c wff $.\n$( unfinished comment")))
-    (is (thrown? Exception (strip-comments "$c wff $.\n$) $v x $.\n$( finished comment $)\n"))))
+    (is (thrown? ParseException (strip-comments "$c wff $.\n$( unfinished comment")))
+    (is (thrown? ParseException (strip-comments "$c wff $.\n$) $v x $.\n$( finished comment $)\n"))))
   (testing "$( $[ $) is a comment"
     (is (= "$c wff $.\n\n$v x $.\n"    (strip-comments "$c wff $.\n$( $[ $)\n$v x $.\n"))))
   (testing "they may not contain the 2-character sequences $( or $) (comments do not nest)"
-    (is (thrown? Exception (strip-comments "$c wff $.\n$( comment $( nested comment, illegal $) $)\n$v x $.\n")))))
+    (is (thrown? ParseException (strip-comments "$c wff $.\n$( comment $( nested comment, illegal $) $)\n$v x $.\n")))))
 
 (deftest test-load-includes
   (let [slurp-original slurp
@@ -40,7 +40,7 @@
         (is (= "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n"
                (first (load-includes "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n" ["root.mm"])))))
       (testing "It is only allowed in the outermost scope (i.e., not between ${ and $})"
-        (is (thrown? Exception (load-includes "$[ wrong-include.mm $]\n" ["root.mm"]))))
+        (is (thrown? ParseException (load-includes "$[ wrong-include.mm $]\n" ["root.mm"]))))
       (testing "nested inclusion"
         (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n"
                (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n" ["root.mm"]))))

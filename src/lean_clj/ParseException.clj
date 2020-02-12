@@ -1,2 +1,4 @@
 (ns lean-clj.ParseException
-  (:gen-class :extends java.lang.Exception))
+  (:gen-class :extends java.lang.Exception
+              :name lean-clj.ParseException))
+

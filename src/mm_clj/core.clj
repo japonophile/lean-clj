@@ -59,31 +59,34 @@
    (let [program (check-grammar (strip-comments (slurp filename)))]
      (load-includes program included-files))))
 
-(defrecord State [constants variables])
+(defrecord ParserState [constants variables vartypes])
 
-(defn- add-constant
-  "add constant to state"
-  [children state]
+(defn- add-const-var
+  "add constant or a variable to the parser state"
+  [children state constvar]
   (let [_ (assert (= 1 (count children)))
-        c (first children)]
-    (if (some #{c} (:constants state))
-      (throw (ParseException. (str "Constant " c " was already defined before")))
-      (assoc state :constants (conj (:constants state) (first children))))))
+        cv (first children)]
+    (if (some #{cv} (constvar state))
+      (throw (ParseException. (str (if (= :constants constvar) "Constant " "Variable ") cv " was already defined before")))
+      (assoc state constvar (conj (constvar state) (first children))))))
 
-(defn traverse
-  "traverse a parse tree"
+(defn check-program
+  "check a program parse tree"
   [tree state]
   ; (println state)
-  (let [[node-type & children] tree]
-    (case node-type
-      :constant (add-constant children state)
-      (reduce #(traverse %2 %1) state children))))
+  (if (instance? instaparse.gll.Failure tree)
+    (throw (ParseException. (str (:reason tree))))
+    (let [[node-type & children] tree]
+      (case node-type
+        :constant (add-const-var children state :constants)
+        :variable (add-const-var children state :variables)
+        (reduce #(check-program %2 %1) state children)))))
 
 (defn parse-mm-program
   "parse a metamath program"
   [program]
   (let [tree (mm-parser program)]
-    (println (traverse tree (State. #{} #{})))))
+    (println (check-program tree (ParserState. #{} #{} {})))))
 
 (defn parse-mm
   "parse a metamath file"

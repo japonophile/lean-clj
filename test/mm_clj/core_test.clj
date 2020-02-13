@@ -53,5 +53,15 @@
 
 (deftest variables-and-constants
   (testing "The same math symbol may not occur twice in a given $v or $c statement"
-    (is (thrown? ParseException (parse-mm-program "$c c c $.\n")))))
+    (is (thrown? ParseException (parse-mm-program "$c c c $.\n")))
+    (is (thrown? ParseException (parse-mm-program "$v x y x $.\n"))))
+  (testing "A constant must be declared in the outermost block"
+    (is (nil? (parse-mm-program "$c a b c $.\n${\n  $v x y $.\n$}\n$c d e f $.\n")))
+    (is (thrown? ParseException (parse-mm-program "$c a b c $.\n${\n  $c d e f $.\n$}\n"))))
+  (testing "A constant ... may not be declared a second time.")
+    (is (thrown? ParseException (parse-mm-program "$c a b c $.\n${\n  $v x y $.\n$}\n$c b $.\n")))
+  (testing "A variable may not be declared a second time while it is active"
+    (is (thrown? ParseException (parse-mm-program "${\n  $v x y $.\n  $v z x $. $}\n"))))
+  (testing "[a variable] may be declared again (as a variable, but not as a constant) after it becomes inactive."
+    (is (nil? (parse-mm-program "${\n  $v x y $.\n$}\n$v z x $.\n")))))
 

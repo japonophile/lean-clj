@@ -70,8 +70,10 @@
 
 (deftest hypotheses
   (testing "A $f statement consists of a label, followed by $f, followed by its typecode (an active constant), followed by an active variable, followed by the $. token."
+    (is (record? (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var x $.\n")))
     (is (thrown? ParseException (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var y $.\n")))
     (is (thrown? ParseException (parse-mm-program "$c var c $.\n$v x $.\nvarx $f bar x $.\n")))
-    (is (thrown? ParseException (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var c $.\n")))
-    (is (record? (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var x $.\n")))))
+    (is (thrown? ParseException (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var c $.\n"))))
+  (testing " A $e statement consists of a label, followed by $e, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by the $. token."
+    (is (record? (parse-mm-program "$c a b c $.\n$v x $.\ness1 $e x a a $.\n")))))
 

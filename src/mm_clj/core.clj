@@ -142,7 +142,9 @@
         :variable-stmt (reduce #(add-variable (second %2) %1) state children)
         :floating-stmt (check-floating children state)
         :block         (check-block  children state)
-        (reduce #(check-program %2 %1) state children)))))
+        (if (vector? (first children))
+          (reduce #(check-program %2 %1) state children)
+          state)))))
 
 (defn parse-mm-program
   "parse a metamath program"

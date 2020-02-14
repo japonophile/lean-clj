@@ -122,7 +122,7 @@
   "parse a metamath program"
   [program]
   (let [tree (mm-parser program)]
-    (println (check-program tree (ParserState. #{} {})))))
+    (check-program tree (ParserState. #{} {}))))
 
 (defn parse-mm
   "parse a metamath file"

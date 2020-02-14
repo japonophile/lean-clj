@@ -63,5 +63,6 @@
   (testing "A variable may not be declared a second time while it is active"
     (is (thrown? ParseException (parse-mm-program "${\n  $v x y $.\n  $v z x $. $}\n"))))
   (testing "[a variable] may be declared again (as a variable, but not as a constant) after it becomes inactive."
-    (is (nil? (parse-mm-program "${\n  $v x y $.\n$}\n$v z x $.\n")))))
+    (is (nil? (parse-mm-program "${\n  $v x y $.\n$}\n$v z x $.\n")))
+    (is (thrown? ParseException (parse-mm-program "${\n  $v x y $.\n$}\n$c z x $.\n")))))
 

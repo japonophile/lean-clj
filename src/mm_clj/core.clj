@@ -59,16 +59,51 @@
    (let [program (check-grammar (strip-comments (slurp filename)))]
      (load-includes program included-files))))
 
-(defrecord ParserState [constants variables vartypes])
+(defrecord ParserState [constants variables])
 
-(defn- add-const-var
-  "add constant or a variable to the parser state"
-  [children state constvar]
+(defn- add-constant
+  "add constant to the parser state"
+  [children state]
   (let [_ (assert (= 1 (count children)))
-        cv (first children)]
-    (if (some #{cv} (constvar state))
-      (throw (ParseException. (str (if (= :constants constvar) "Constant " "Variable ") cv " was already defined before")))
-      (assoc state constvar (conj (constvar state) (first children))))))
+        c (first children)]
+    (if (some #{c} (:constants state))
+      (throw (ParseException. (str "Constant " c " was already defined before")))
+      (if (contains? (:variables state) c)
+        (throw (ParseException. (str "Label " c " was previously defined as a variable before")))
+        (assoc state :constants (conj (:constants state) (first children)))))))
+
+(defn- add-variable
+  "add variable to the parser state"
+  [children state]
+  (let [_ (assert (= 1 (count children)))
+        v (first children)]
+    (let [vv (get (:variables state) v)]
+      (if (and vv (:active vv))
+        (throw (ParseException. (str "Variable " v " was already defined before")))
+        (assoc state :variables (assoc (:variables state) (first children) {:type nil :active true}))))))
+
+(defn active-variables
+  "get active variables"
+  [state]
+  (map #(first %) (filter #(true? (:active %)) (:variables state))))
+
+(defn deactivate-vars
+  "deactivate variables that should not be active"
+  [variables active-vars]
+  (into {} (map (fn [[k v]]
+                  (if (not (some #{k} active-vars))
+                    [k (assoc v :active false)]
+                    [k v]))
+                variables)))
+
+(def check-program)
+
+(defn check-block
+  "check a block in the program parse tree"
+  [block-stmts state]
+  (let [active-vars (active-variables state)
+        parse-result (reduce #(check-program %2 %1) state block-stmts)]
+    (assoc parse-result :variables (deactivate-vars (:variables parse-result) active-vars))))
 
 (defn check-program
   "check a program parse tree"
@@ -78,15 +113,16 @@
     (throw (ParseException. (str (:reason tree))))
     (let [[node-type & children] tree]
       (case node-type
-        :constant (add-const-var children state :constants)
-        :variable (add-const-var children state :variables)
+        :constant (add-constant children state)
+        :variable (add-variable children state)
+        :block    (check-block  children state)
         (reduce #(check-program %2 %1) state children)))))
 
 (defn parse-mm-program
   "parse a metamath program"
   [program]
   (let [tree (mm-parser program)]
-    (println (check-program tree (ParserState. #{} #{} {})))))
+    (println (check-program tree (ParserState. #{} {})))))
 
 (defn parse-mm
   "parse a metamath file"

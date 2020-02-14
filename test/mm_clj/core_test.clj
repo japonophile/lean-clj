@@ -12,12 +12,15 @@
     (is (= "$c wff $.\n\n$v x $.\n\nax1 $a x $.\n"
            (strip-comments "$c wff $.\n$( first comment $)\n$v x $.\n$( second comment $)\nax1 $a x $.\n")))
     (is (= "$c wff $.\n\n$v x $.\n"    (strip-comments "$c wff $.\n$( multiline \ncomment $)\n$v x $.\n")))
-    (is (thrown? ParseException (strip-comments "$c wff $.\n$( unfinished comment")))
-    (is (thrown? ParseException (strip-comments "$c wff $.\n$) $v x $.\n$( finished comment $)\n"))))
+    (is (thrown-with-msg? ParseException #"Malformed comment"
+                          (strip-comments "$c wff $.\n$( unfinished comment")))
+    (is (thrown-with-msg? ParseException #"Malformed comment"
+                          (strip-comments "$c wff $.\n$) $v x $.\n$( finished comment $)\n"))))
   (testing "$( $[ $) is a comment"
     (is (= "$c wff $.\n\n$v x $.\n"    (strip-comments "$c wff $.\n$( $[ $)\n$v x $.\n"))))
   (testing "they may not contain the 2-character sequences $( or $) (comments do not nest)"
-    (is (thrown? ParseException (strip-comments "$c wff $.\n$( comment $( nested comment, illegal $) $)\n$v x $.\n")))))
+    (is (thrown-with-msg? ParseException #"Comments may not be nested"
+                          (strip-comments "$c wff $.\n$( comment $( nested comment, illegal $) $)\n$v x $.\n")))))
 
 (deftest test-load-includes
   (let [slurp-original slurp
@@ -39,7 +42,8 @@
         (is (= "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n"
                (first (load-includes "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n" ["root.mm"])))))
       (testing "It is only allowed in the outermost scope (i.e., not between ${ and $})"
-        (is (thrown? ParseException (load-includes "$[ wrong-include.mm $]\n" ["root.mm"]))))
+        (is (thrown-with-msg? ParseException #".*:expecting \"\$}\".*"
+                              (load-includes "$[ wrong-include.mm $]\n" ["root.mm"]))))
       (testing "nested inclusion"
         (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n"
                (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n" ["root.mm"]))))
@@ -53,27 +57,36 @@
 
 (deftest variables-and-constants
   (testing "The same math symbol may not occur twice in a given $v or $c statement"
-    (is (thrown? ParseException (parse-mm-program "$c c c $.\n")))
-    (is (thrown? ParseException (parse-mm-program "$v x y x $.\n"))))
+    (is (thrown-with-msg? ParseException #"Constant c was already defined before"
+                          (parse-mm-program "$c c c $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable x was already defined before"
+                          (parse-mm-program "$v x y x $.\n"))))
   (testing "A math symbol becomes active when declared and stays active until the end of the block in which it is declared."
     (is (true? (:active (get (:variables (parse-mm-program "$v x y $.\n")) "x")))))
   (testing "A constant must be declared in the outermost block"
     (is (record? (parse-mm-program "$c a b c $.\n${\n  $v x y $.\n$}\n$c d e f $.\n")))
-    (is (thrown? ParseException (parse-mm-program "$c a b c $.\n${\n  $c d e f $.\n$}\n"))))
+    (is (thrown-with-msg? ParseException #".*:expecting \"\$}\".*"
+                          (parse-mm-program "$c a b c $.\n${\n  $c d e f $.\n$}\n"))))
   (testing "A constant ... may not be declared a second time.")
-    (is (thrown? ParseException (parse-mm-program "$c a b c $.\n${\n  $v x y $.\n$}\n$c b $.\n")))
+    (is (thrown-with-msg? ParseException #"Constant b was already defined before"
+                          (parse-mm-program "$c a b c $.\n${\n  $v x y $.\n$}\n$c b $.\n")))
   (testing "A variable may not be declared a second time while it is active"
-    (is (thrown? ParseException (parse-mm-program "${\n  $v x y $.\n  $v z x $. $}\n"))))
+    (is (thrown-with-msg? ParseException #"Variable x was already defined before"
+                          (parse-mm-program "${\n  $v x y $.\n  $v z x $. $}\n"))))
   (testing "[a variable] may be declared again (as a variable, but not as a constant) after it becomes inactive."
     (is (record? (parse-mm-program "${\n  $v x y $.\n$}\n$v z x $.\n")))
-    (is (thrown? ParseException (parse-mm-program "${\n  $v x y $.\n$}\n$c z x $.\n")))))
+    (is (thrown-with-msg? ParseException #"Label x was previously defined as a variable before"
+                          (parse-mm-program "${\n  $v x y $.\n$}\n$c z x $.\n")))))
 
 (deftest hypotheses
   (testing "A $f statement consists of a label, followed by $f, followed by its typecode (an active constant), followed by an active variable, followed by the $. token."
     (is (record? (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var x $.\n")))
-    (is (thrown? ParseException (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var y $.\n")))
-    (is (thrown? ParseException (parse-mm-program "$c var c $.\n$v x $.\nvarx $f bar x $.\n")))
-    (is (thrown? ParseException (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var c $.\n"))))
+    (is (thrown-with-msg? ParseException #"Variable y not defined"
+                          (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var y $.\n")))
+    (is (thrown-with-msg? ParseException #"Type bar not found in constants"
+                          (parse-mm-program "$c var c $.\n$v x $.\nvarx $f bar x $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable c not defined"
+                          (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var c $.\n"))))
   (testing " A $e statement consists of a label, followed by $e, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by the $. token."
     (is (record? (parse-mm-program "$c a b c $.\n$v x $.\ness1 $e x a a $.\n")))))
 

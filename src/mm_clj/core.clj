@@ -131,26 +131,25 @@
 
 (defn- check-program
   "check a program parse tree"
-  [tree state]
-  ; (println tree)
+  [[node-type & children] state]
+  ; (println [node-type children])
   ; (println state)
-  (if (instance? instaparse.gll.Failure tree)
-    (throw (ParseException. (str (:reason tree))))
-    (let [[node-type & children] tree]
-      (case node-type
-        :constant-stmt (reduce #(add-constant (second %2) %1) state children)
-        :variable-stmt (reduce #(add-variable (second %2) %1) state children)
-        :floating-stmt (check-floating children state)
-        :block         (check-block  children state)
-        (if (vector? (first children))
-          (reduce #(check-program %2 %1) state children)
-          state)))))
+  (case node-type
+    :constant-stmt (reduce #(add-constant (second %2) %1) state children)
+    :variable-stmt (reduce #(add-variable (second %2) %1) state children)
+    :floating-stmt (check-floating children state)
+    :block         (check-block  children state)
+    (if (vector? (first children))
+      (reduce #(check-program %2 %1) state children)
+      state)))
 
 (defn parse-mm-program
   "parse a metamath program"
   [program]
   (let [tree (mm-parser program)]
-    (check-program tree (ParserState. #{} {} #{} {} {}))))
+    (if (instance? instaparse.gll.Failure tree)
+      (throw (ParseException. (str (:reason tree))))
+      (check-program tree (ParserState. #{} {} #{} {} {})))))
 
 (defn parse-mm
   "parse a metamath file"

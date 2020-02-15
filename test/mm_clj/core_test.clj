@@ -1,7 +1,7 @@
 (ns mm-clj.core-test
   (:require
-    [mm-clj.core :refer :all]
-    [clojure.test :refer :all])
+    [mm-clj.core :refer [strip-comments load-includes parse-mm-program]]
+    [clojure.test :refer [deftest is testing]])
   (:import
     [mm-clj ParseException]))
 

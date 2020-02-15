@@ -25,7 +25,7 @@
   "parse metamath program"
   [program]
   (let [result (mm-parser program)]
-    (if (instance? instaparse.gll.Failure result)
+    (if (instance? Failure result)
       (throw (ParseException. (str (:reason result))))
       program)))
 
@@ -147,7 +147,7 @@
   "parse a metamath program"
   [program]
   (let [tree (mm-parser program)]
-    (if (instance? instaparse.gll.Failure tree)
+    (if (instance? Failure tree)
       (throw (ParseException. (str (:reason tree))))
       (check-program tree (ParserState. #{} {} #{} {} {})))))
 

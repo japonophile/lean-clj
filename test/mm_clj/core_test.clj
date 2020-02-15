@@ -99,6 +99,22 @@
     (is (thrown-with-msg? ParseException #"Variable or constant x not defined"
                           (parse-mm-program "$c var a b $.\n${ $v x $. $}\ness1 $e var x a a $.\n"))))
   (testing "The type declared by a $f statement for a given label is global even if the variable is not (e.g., a database may not have wff P in one local scope and class P in another)."
-    (is (thrown-with-msg? ParseException #"Variable P already has type wff"
+    (is (thrown-with-msg? ParseException #"Variable P was previously assigned type wff"
                           (parse-mm-program "$c wff class $.\n${ $v P $.\nwff_P $f wff P $. $}\n${ $v P $.\nclass_P $f class P $. $}\n")))))
 
+(deftest disjoints
+  (testing "A simple $d statement consists of $d, followed by two different active variables, followed by the $. token."
+    (is (record? (parse-mm-program "$v x y $.\n$d x y $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable x appears more than once in a disjoint statement"
+                          (parse-mm-program "$v x y $.\n$d x x $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable x not defined"
+                          (parse-mm-program "$v y $.\n$d x y $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable x not active"
+                          (parse-mm-program "$v y $.\n${ $v x $. $}\n$d x y $.\n"))))
+  (testing "A compound $d statement consists of $d, followed by three or more variables (all different), followed by the $. token."
+    (is (record? (parse-mm-program "$v x y z $.\n$d x z y $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable z appears more than once in a disjoint statement"
+                          (parse-mm-program "$v x y z $.\n$d z x z y $.\n"))))
+  (testing "The order of the variables in a $d statement is unimportant."
+    (is (= (parse-mm-program "$v x y z $.\n$d x y z $.\n")
+           (parse-mm-program "$v x y z $.\n$d x z y $.\n")))))

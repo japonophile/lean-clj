@@ -1,7 +1,8 @@
 (ns mm-clj.core
   (:require
-    [clojure.string :refer [index-of includes?]]
     [clojure.java.io :as io]
+    [clojure.math.combinatorics :refer [combinations]]
+    [clojure.string :refer [index-of includes?]]
     [instaparse.core :as insta])
   (:import
     instaparse.gll.Failure
@@ -59,7 +60,7 @@
    (let [program (check-grammar (strip-comments (slurp filename)))]
      (load-includes program included-files))))
 
-(defrecord ParserState [constants variables labels floatings essentials])
+(defrecord ParserState [constants variables labels floatings essentials disjoints])
 
 (defn- add-constant
   "add constant to the parser state"
@@ -101,28 +102,44 @@
                     [k v]))
                 variables)))
 
-(defn- set-var-type
-  "set the type of a variable"
-  [variable typecode state]
+(defn- get-active-variable
+  "get a variable, ensuring it is defined and active"
+  [variable state]
   (let [v (get (:variables state) variable)]
     (if (nil? v)
       (throw (ParseException. (str "Variable " variable " not defined")))
       (if (not (:active v))
-        (throw (ParseException. (str "Variable " variable " is not active")))
-        (if (:type v)
-          (throw (ParseException. (str "Variable " variable " already has type " (:type v))))
-          (if (nil? (get (:constants state) typecode))
-            (throw (ParseException. (str "Type " typecode " not found in constants")))
-            (assoc-in state [:variables variable :type] typecode)))))))
+        (throw (ParseException. (str "Variable " variable " not active")))
+        v))))
+
+(defn- set-var-type
+  "set the type of a variable"
+  [variable typecode state]
+  (let [v (get-active-variable variable state)]
+    (if (:type v)
+      (throw (ParseException. (str "Variable " variable " was previously assigned type " (:type v))))
+      (if (nil? (get (:constants state) typecode))
+        (throw (ParseException. (str "Type " typecode " not found in constants")))
+        (assoc-in state [:variables variable :type] typecode)))))
 
 (def check-program)
 
 (defn- check-block
   "check a block in the program parse tree"
   [block-stmts state]
+  ; save active vars, hypotheses and disjoints
   (let [active-vars (active-variables state)
-        parse-result (reduce #(check-program %2 %1) state block-stmts)]
-    (assoc parse-result :variables (deactivate-vars (:variables parse-result) active-vars))))
+        floatings   (:floatings state)
+        essentials  (:essentials state)
+        disjoints   (:disjoints state)
+        ; parse block
+        state (reduce #(check-program %2 %1) state block-stmts)]
+        ; revert active vars, hypotheses and disjoints
+    (-> state
+        (assoc :variables  (deactivate-vars (:variables state) active-vars))
+        (assoc :floatings  floatings)
+        (assoc :essentials essentials)
+        (assoc :disjoints  disjoints))))
 
 (defn- check-floating
   "check a floating hypothesis statement in the program parse tree"
@@ -152,6 +169,32 @@
       (throw (ParseException. (str "Type " typecode " not found in constants")))
       (assoc-in state [:essentials label] {:type typecode :symbols symbols}))))
 
+(defn- check-unique
+  "check that each variable is unique"
+  [variables]
+  (doall
+    (map #(if (< 1 (second %))
+            (throw (ParseException.  (str "Variable " (first %) " appears more than once in a disjoint statement")))
+            :ok)
+         (frequencies variables))))
+
+(defn- add-disjoint
+  "add a disjoint pair to the state"
+  [[x y] state]
+  (let [disjoints (:disjoints state)
+        pair (sort [x y])]
+    (if (some #{pair} disjoints)
+      (throw (ParseException. (str "Disjoint variable restriction " pair " already defined")))
+      (assoc state :disjoints (conj disjoints pair)))))
+
+(defn- check-disjoint
+  "check a disjoint statement in the program parse tree"
+  [variables state]
+  (let [vs (map second variables)
+        _ (check-unique vs)
+        _ (doall (map #(get-active-variable % state) vs))]
+    (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
+
 (defn- check-program
   "check a program parse tree"
   [[node-type & children] state]
@@ -162,6 +205,7 @@
     :variable-stmt  (reduce #(add-variable (second %2) %1) state children)
     :floating-stmt  (check-floating children state)
     :essential-stmt (check-essential children state)
+    :disjoint-stmt  (check-disjoint children state)
     :block          (check-block  children state)
     (if (vector? (first children))
       (reduce #(check-program %2 %1) state children)
@@ -173,7 +217,7 @@
   (let [tree (mm-parser program)]
     (if (instance? Failure tree)
       (throw (ParseException. (str (:reason tree))))
-      (check-program tree (ParserState. #{} {} #{} {} {})))))
+      (check-program tree (ParserState. #{} {} #{} {} {} #{})))))
 
 (defn parse-mm
   "parse a metamath file"

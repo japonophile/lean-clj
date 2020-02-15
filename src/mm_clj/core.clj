@@ -60,7 +60,7 @@
    (let [program (check-grammar (strip-comments (slurp filename)))]
      (load-includes program included-files))))
 
-(defrecord ParserState [constants variables labels floatings essentials disjoints])
+(defrecord ParserState [constants variables labels floatings essentials disjoints axioms provables])
 
 (defn- add-constant
   "add constant to the parser state"
@@ -151,14 +151,15 @@
 (defn- check-symbols
   "check all symbols are defined and active"
   [symbols state]
-  (doall (map (fn [s]
-                (if (not-any? #{s} (:constants state))
-                  (let [v (get (:variables state) s)]
-                    (if (or (nil? v) (false? (:active v)))
-                      (throw (ParseException. (str "Variable or constant " s " not defined")))
-                      :ok))
-                  :ok))
-              symbols)))
+  (doall
+    (map (fn [s]
+           (if (not-any? #{s} (:constants state))
+             (let [v (get (:variables state) s)]
+               (if (or (nil? v) (false? (:active v)))
+                 (throw (ParseException. (str "Variable or constant " s " not defined")))
+                 :ok))
+             :ok))
+         symbols)))
 
 (defn- check-essential
   "check an essential hypothesis statement in the program parse tree"
@@ -195,6 +196,15 @@
         _ (doall (map #(get-active-variable % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
+(defn- check-axiom
+  "check an axiom statement in the program parse tree"
+  [[[_ label] [_ [_ typecode]] & symbols] state]
+  (let [state (add-label label state)
+        _ (check-symbols symbols state)]
+    (if (not-any? #{typecode} (:constants state))
+      (throw (ParseException. (str "Type " typecode " not found in constants")))
+      (assoc-in state [:axioms label] {:type typecode :symbols symbols}))))
+
 (defn- check-program
   "check a program parse tree"
   [[node-type & children] state]
@@ -206,7 +216,8 @@
     :floating-stmt  (check-floating children state)
     :essential-stmt (check-essential children state)
     :disjoint-stmt  (check-disjoint children state)
-    :block          (check-block  children state)
+    :axiom-stmt     (check-axiom children state)
+    :block          (check-block children state)
     (if (vector? (first children))
       (reduce #(check-program %2 %1) state children)
       state)))
@@ -217,7 +228,7 @@
   (let [tree (mm-parser program)]
     (if (instance? Failure tree)
       (throw (ParseException. (str (:reason tree))))
-      (check-program tree (ParserState. #{} {} #{} {} {} #{})))))
+      (check-program tree (ParserState. #{} {} #{} {} {} #{} {} {})))))
 
 (defn parse-mm
   "parse a metamath file"

@@ -118,3 +118,13 @@
   (testing "The order of the variables in a $d statement is unimportant."
     (is (= (parse-mm-program "$v x y z $.\n$d x y z $.\n")
            (parse-mm-program "$v x y z $.\n$d x z y $.\n")))))
+
+(deftest assertions
+  (testing "A $a statement consists of a label, followed by $a, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by the $. token."
+    (is (record? (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff x $.\n")))
+    (is (record? (parse-mm-program "$c var wff = $.\n$v x $.\nvarx $f var x $.\nax1 $a wff = x x $.\n")))
+    (is (thrown-with-msg? ParseException #"Type woof not found in constants"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a woof x $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable or constant y not defined"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff y $.\n")))))
+

@@ -88,5 +88,7 @@
     (is (thrown-with-msg? ParseException #"Variable c not defined"
                           (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var c $.\n"))))
   (testing " A $e statement consists of a label, followed by $e, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by the $. token."
-    (is (record? (parse-mm-program "$c a b c $.\n$v x $.\ness1 $e x a a $.\n")))))
+    (is (record? (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var x a a $.\n"))))
+    (is (thrown-with-msg? ParseException #"Variable or constant y not defined"
+                          (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var y a a $.\n"))))
 

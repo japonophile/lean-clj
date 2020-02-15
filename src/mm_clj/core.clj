@@ -76,7 +76,7 @@
   (let [v (get (:variables state) variable)]
     (if (and v (:active v))
       (throw (ParseException. (str "Variable " variable " was already defined before")))
-      (assoc state :variables (assoc (:variables state) variable {:type nil :active true})))))
+      (assoc-in state [:variables variable] {:type nil :active true}))))
 
 (defn- add-label
   "add label to the parser state"
@@ -111,7 +111,7 @@
           (throw (ParseException. (str "Variable " variable " already has type " (:type v))))
           (if (nil? (get (:constants state) typecode))
             (throw (ParseException. (str "Type " typecode " not found in constants")))
-            (assoc state :variables (assoc (:variables state) variable (assoc v :type typecode)))))))))
+            (assoc-in state [:variables variable :type] typecode)))))))
 
 (def check-program)
 
@@ -123,11 +123,32 @@
     (assoc parse-result :variables (deactivate-vars (:variables parse-result) active-vars))))
 
 (defn- check-floating
-  "check a floating statement in the program parse tree"
+  "check a floating hypothesis statement in the program parse tree"
   [[[_ label] [_ [_ typecode]] [_ variable]] state]
   (let [state (add-label label state)
         state (set-var-type variable typecode state)]
-    (assoc state :floatings (assoc (:floatings state) label {:variable variable :type typecode}))))
+    (assoc-in state [:floatings label] {:variable variable :type typecode})))
+
+(defn- check-symbols
+  "check all symbols are defined and active"
+  [symbols state]
+  (doall (map (fn [s]
+                (if (not-any? #{s} (:constants state))
+                  (let [v (get (:variables state) s)]
+                    (if (or (nil? v) (false? (:active v)))
+                      (throw (ParseException. (str "Variable or constant " s " not defined")))
+                      :ok))
+                  :ok))
+              symbols)))
+
+(defn- check-essential
+  "check an essential hypothesis statement in the program parse tree"
+  [[[_ label] [_ [_ typecode]] & symbols] state]
+  (let [state (add-label label state)
+        _ (check-symbols symbols state)]
+    (if (not-any? #{typecode} (:constants state))
+      (throw (ParseException. (str "Type " typecode " not found in constants")))
+      (assoc-in state [:essentials label] {:type typecode :symbols symbols}))))
 
 (defn- check-program
   "check a program parse tree"
@@ -135,10 +156,11 @@
   ; (println [node-type children])
   ; (println state)
   (case node-type
-    :constant-stmt (reduce #(add-constant (second %2) %1) state children)
-    :variable-stmt (reduce #(add-variable (second %2) %1) state children)
-    :floating-stmt (check-floating children state)
-    :block         (check-block  children state)
+    :constant-stmt  (reduce #(add-constant (second %2) %1) state children)
+    :variable-stmt  (reduce #(add-variable (second %2) %1) state children)
+    :floating-stmt  (check-floating children state)
+    :essential-stmt (check-essential children state)
+    :block          (check-block  children state)
     (if (vector? (first children))
       (reduce #(check-program %2 %1) state children)
       state)))

@@ -81,14 +81,24 @@
 (deftest hypotheses
   (testing "A $f statement consists of a label, followed by $f, followed by its typecode (an active constant), followed by an active variable, followed by the $. token."
     (is (record? (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var x $.\n")))
-    (is (thrown-with-msg? ParseException #"Variable y not defined"
-                          (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var y $.\n")))
     (is (thrown-with-msg? ParseException #"Type bar not found in constants"
                           (parse-mm-program "$c var c $.\n$v x $.\nvarx $f bar x $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable y not defined"
+                          (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var y $.\n")))
     (is (thrown-with-msg? ParseException #"Variable c not defined"
                           (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var c $.\n"))))
-  (testing " A $e statement consists of a label, followed by $e, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by the $. token."
-    (is (record? (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var x a a $.\n"))))
+  (testing "A $e statement consists of a label, followed by $e, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by the $. token."
+    (is (record? (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var x a a $.\n")))
+    (is (record? (parse-mm-program "$c var $.\ness1 $e var $.\n")))
+    (is (thrown-with-msg? ParseException #"Type bar not found in constants"
+                          (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e bar x a a $.\n")))
     (is (thrown-with-msg? ParseException #"Variable or constant y not defined"
-                          (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var y a a $.\n"))))
+                          (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var y a a $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable or constant c not defined"
+                          (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var x a b a x c $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable or constant x not defined"
+                          (parse-mm-program "$c var a b $.\n${ $v x $. $}\ness1 $e var x a a $.\n"))))
+  (testing "The type declared by a $f statement for a given label is global even if the variable is not (e.g., a database may not have wff P in one local scope and class P in another)."
+    (is (thrown-with-msg? ParseException #"Variable P already has type wff"
+                          (parse-mm-program "$c wff class $.\n${ $v P $.\nwff_P $f wff P $. $}\n${ $v P $.\nclass_P $f class P $. $}\n")))))
 

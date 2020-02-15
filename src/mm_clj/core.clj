@@ -76,7 +76,9 @@
   (let [v (get (:variables state) variable)]
     (if (and v (:active v))
       (throw (ParseException. (str "Variable " variable " was already defined before")))
-      (assoc-in state [:variables variable] {:type nil :active true}))))
+      (if v
+        (assoc-in state [:variables variable :active] true)  ; variable exists -> make active (do not erase type)
+        (assoc-in state [:variables variable] {:type nil :active true})))))  ; variable does not exist -> add it
 
 (defn- add-label
   "add label to the parser state"

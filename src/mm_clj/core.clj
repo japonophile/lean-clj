@@ -168,7 +168,7 @@
         _ (check-symbols symbols state)]
     (if (not-any? #{typecode} (:constants state))
       (throw (ParseException. (str "Type " typecode " not found in constants")))
-      (assoc-in state [:essentials label] {:type typecode :symbols symbols}))))
+      (assoc-in state [:essentials label] {:type typecode :symbols (vec symbols)}))))
 
 (defn- check-unique
   "check that each variable is unique"
@@ -196,14 +196,43 @@
         _ (doall (map #(get-active-variable % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
-(defn- check-axiom
-  "check an axiom statement in the program parse tree"
-  [[[_ label] [_ [_ typecode]] & symbols] state]
+(defn- check-assertion
+  "check an assertion (axiom or provable) statement in the program parse tree"
+  [assertion-type [[_ label] [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
         _ (check-symbols symbols state)]
     (if (not-any? #{typecode} (:constants state))
       (throw (ParseException. (str "Type " typecode " not found in constants")))
-      (assoc-in state [:axioms label] {:type typecode :symbols symbols}))))
+      (assoc-in state [assertion-type label] {:type typecode :symbols (vec symbols)}))))
+
+(defn- check-axiom
+  "check an axiom statement in the program parse tree"
+  [tree state]
+  (check-assertion :axioms tree state))
+
+(defn- check-labels
+  "check all labels are defined"
+  [labels state]
+  (doall (map #(if (not-any? #{%} (:labels state))
+                 (throw (ParseException. (str "Label " % " not defined")))
+                 :ok)
+              labels)))
+
+(defn- check-proof
+  "check the proof part of a provable statement in the program parse tree"
+  [label [_ [proof-format & proof]] state]
+  (case proof-format
+    :compressed-proof (throw (ParseException. "Compressed proof not supported (yet)"))
+    :uncompressed-proof (let [labels (vec (map second proof))
+                              _ (check-labels labels state)]
+                          (assoc-in state [:provables label :proof] labels))))
+
+(defn- check-provable
+  "check an axiom statement in the program parse tree"
+  [tree state]
+  (let [state (check-assertion :provables (butlast tree) state)
+        [[_ label] & _] tree]
+    (check-proof label (last tree) state)))
 
 (defn- check-program
   "check a program parse tree"
@@ -217,6 +246,7 @@
     :essential-stmt (check-essential children state)
     :disjoint-stmt  (check-disjoint children state)
     :axiom-stmt     (check-axiom children state)
+    :provable-stmt  (check-provable children state)
     :block          (check-block children state)
     (if (vector? (first children))
       (reduce #(check-program %2 %1) state children)

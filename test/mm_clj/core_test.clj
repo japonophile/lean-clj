@@ -126,5 +126,11 @@
     (is (thrown-with-msg? ParseException #"Type woof not found in constants"
                           (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a woof x $.\n")))
     (is (thrown-with-msg? ParseException #"Variable or constant y not defined"
-                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff y $.\n")))))
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff y $.\n"))))
+  (testing "A $p statement consists of a label, followed by $p, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by $=, followed by a sequence of labels, followed by the $. token."
+    (is (record? (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p wff x $= dum dum $.\n")))
+    (is (record? (parse-mm-program "$c var wff = $.\n$v x $.\nvarx $f var x $.\nding $a var x $.\ndong $a wff x $.\np1 $p wff = x x $= ding dong $.\n")))
+    (is (thrown-with-msg? ParseException #"Type woof not found in constants"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p woof x $= dum dum $.\n")))
+    ))
 

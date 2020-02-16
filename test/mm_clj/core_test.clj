@@ -75,8 +75,11 @@
                           (parse-mm-program "${\n  $v x y $.\n  $v z x $. $}\n"))))
   (testing "[a variable] may be declared again (as a variable, but not as a constant) after it becomes inactive."
     (is (record? (parse-mm-program "${\n  $v x y $.\n$}\n$v z x $.\n")))
-    (is (thrown-with-msg? ParseException #"Label x was previously defined as a variable before"
-                          (parse-mm-program "${\n  $v x y $.\n$}\n$c z x $.\n")))))
+    (is (thrown-with-msg? ParseException #"Constant x was previously defined as a variable before"
+                          (parse-mm-program "${\n  $v x y $.\n$}\n$c z x $.\n"))))
+  (testing "A variable must not match an existing constant (follows from other rules)"
+    (is (thrown-with-msg? ParseException #"Variable x matches an existing constant"
+                          (parse-mm-program "$c x $.\n$v x $.\n")))))
 
 (deftest hypotheses
   (testing "A $f statement consists of a label, followed by $f, followed by its typecode (an active constant), followed by an active variable, followed by the $. token."
@@ -153,5 +156,9 @@
     (is (thrown-with-msg? ParseException #"Label ax1 matches a constant"
                           (parse-mm-program "$c var wff ax1 $.\n$v x $.\nvarx $f var x $.\nax1 $a wff x $.\n")))
     (is (thrown-with-msg? ParseException #"Label ax1 matches a variable"
-                          (parse-mm-program "$c var wff $.\n$v x ax1 $.\nvarx $f var x $.\nax1 $a wff x $.\n")))))
+                          (parse-mm-program "$c var wff $.\n$v x ax1 $.\nvarx $f var x $.\nax1 $a wff x $.\n")))
+    (is (thrown-with-msg? ParseException #"Constant c matches an existing label"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nc $a wff x $.\n$c c $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable y matches an existing label"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\ny $a wff x $.\n$v y $.\n")))))
 

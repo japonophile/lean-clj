@@ -68,18 +68,24 @@
   (if (some #{c} (:constants state))
     (throw (ParseException. (str "Constant " c " was already defined before")))
     (if (contains? (:variables state) c)
-      (throw (ParseException. (str "Label " c " was previously defined as a variable before")))
-      (assoc state :constants (conj (:constants state) c)))))
+      (throw (ParseException. (str "Constant " c " was previously defined as a variable before")))
+      (if (some #{c} (:labels state))
+        (throw (ParseException. (str "Constant " c " matches an existing label")))
+        (assoc state :constants (conj (:constants state) c))))))
 
 (defn- add-variable
   "add variable to the parser state"
   [variable state]
-  (let [v (get (:variables state) variable)]
-    (if (and v (:active v))
-      (throw (ParseException. (str "Variable " variable " was already defined before")))
-      (if v
-        (assoc-in state [:variables variable :active] true)  ; variable exists -> make active (do not erase type)
-        (assoc-in state [:variables variable] {:type nil :active true})))))  ; variable does not exist -> add it
+  (if (some #{variable} (:constants state))
+    (throw (ParseException. (str "Variable " variable " matches an existing constant")))
+    (if (some #{variable} (:labels state))
+      (throw (ParseException. (str "Variable " variable " matches an existing label")))
+      (let [v (get (:variables state) variable)]
+        (if (and v (:active v))
+          (throw (ParseException. (str "Variable " variable " was already defined before")))
+          (if v
+            (assoc-in state [:variables variable :active] true)  ; variable exists -> make active (do not erase type)
+            (assoc-in state [:variables variable] {:type nil :active true})))))))  ; variable does not exist -> add it
 
 (defn- add-label
   "add label to the parser state"

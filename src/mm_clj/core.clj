@@ -27,7 +27,7 @@
   [program]
   (let [result (mm-parser program)]
     (if (instance? Failure result)
-      (throw (ParseException. (str (:reason result))))
+      (throw (ParseException. (str "Parse error: " (:reason result) ", at position " (:index result))))
       program)))
 
 (def read-file)
@@ -43,13 +43,13 @@
 
 (defn load-includes
   "load included files"
-  [text included-files]
+  [text included-files rootdir]
   (let [m (re-find #"(\$\[ (\S+) \$\])" text)]
     (if m
       (let [include-stmt (get m 1)
             filename (get m 2)]
-        (apply load-includes  ; call recursively to load multiple includes in one file
-               (load-include-once text include-stmt filename included-files)))
+        (apply #(load-includes %1 %2 rootdir)  ; call recursively to load multiple includes in one file
+               (load-include-once text include-stmt (str rootdir "/" filename) included-files)))
       [text included-files])))
 
 (defn read-file
@@ -57,8 +57,9 @@
   ([filename]
    (first (read-file filename [filename])))
   ([filename included-files]
-   (let [program (check-grammar (strip-comments (slurp filename)))]
-     (load-includes program included-files))))
+   (let [program (check-grammar (strip-comments (slurp filename)))
+         rootdir (.getParent (io/file filename))]
+     (load-includes program included-files rootdir))))
 
 (defrecord ParserState [constants variables labels floatings essentials disjoints axioms provables])
 
@@ -287,4 +288,4 @@
 (defn -main
   "LEAN clojure"
   [filename]
-  (parse-mm filename))
+  (println (parse-mm filename)))

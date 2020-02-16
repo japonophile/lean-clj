@@ -1,5 +1,5 @@
 
-database ::= outermost-scope-stmt*
+database ::= WS* outermost-scope-stmt*
 
 <outermost-scope-stmt> ::=
   include-stmt | constant-stmt | stmt

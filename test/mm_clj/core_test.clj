@@ -88,19 +88,22 @@
     (is (thrown-with-msg? ParseException #"Variable c not defined"
                           (parse-mm-program "$c var c $.\n$v x $.\nvarx $f var c $.\n"))))
   (testing "A $e statement consists of a label, followed by $e, followed by its typecode (an active constant), followed by zero or more active math symbols, followed by the $. token."
-    (is (record? (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var x a a $.\n")))
+    (is (record? (parse-mm-program "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e var x a a $.\n")))
     (is (record? (parse-mm-program "$c var $.\ness1 $e var $.\n")))
     (is (thrown-with-msg? ParseException #"Type bar not found in constants"
-                          (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e bar x a a $.\n")))
+                          (parse-mm-program "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e bar x a a $.\n")))
     (is (thrown-with-msg? ParseException #"Variable or constant y not defined"
                           (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var y a a $.\n")))
     (is (thrown-with-msg? ParseException #"Variable or constant c not defined"
-                          (parse-mm-program "$c var a b $.\n$v x $.\ness1 $e var x a b a x c $.\n")))
+                          (parse-mm-program "$c var a b $.\n$v x $.\nvarx $f var x $.\ness1 $e var x a b a x c $.\n")))
     (is (thrown-with-msg? ParseException #"Variable or constant x not defined"
                           (parse-mm-program "$c var a b $.\n${ $v x $. $}\ness1 $e var x a a $.\n"))))
   (testing "The type declared by a $f statement for a given label is global even if the variable is not (e.g., a database may not have wff P in one local scope and class P in another)."
     (is (thrown-with-msg? ParseException #"Variable P was previously assigned type wff"
-                          (parse-mm-program "$c wff class $.\n${ $v P $.\nwff_P $f wff P $. $}\n${ $v P $.\nclass_P $f class P $. $}\n")))))
+                          (parse-mm-program "$c wff class $.\n${ $v P $.\nwff_P $f wff P $. $}\n${ $v P $.\nclass_P $f class P $. $}\n"))))
+  (testing "There may not be two active $f statements containing the same variable."
+    (is (thrown-with-msg? ParseException #"Variable x was previously assigned type var"
+                          (parse-mm-program "$c var int $.\n$v x $.\nvarx $f var x $.\nintx $f int x $.\n")))))
 
 (deftest disjoints
   (testing "A simple $d statement consists of $d, followed by two different active variables, followed by the $. token."
@@ -131,6 +134,14 @@
     (is (record? (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p wff x $= dum dum $.\n")))
     (is (record? (parse-mm-program "$c var wff = $.\n$v x $.\nvarx $f var x $.\nding $a var x $.\ndong $a wff x $.\np1 $p wff = x x $= ding dong $.\n")))
     (is (thrown-with-msg? ParseException #"Type woof not found in constants"
-                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p woof x $= dum dum $.\n")))
-    ))
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\ndum $a var x $.\np1 $p woof x $= dum dum $.\n"))))
+  (testing "Each variable in a $e, $a, or $p statement must exist in an active $f statement."
+    (is (thrown-with-msg? ParseException #"Variable x must be assigned a type"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nmin $e wff x $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable x must be assigned a type"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nax1 $a wff x $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable x must be assigned a type"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nho $a wff $.\np1 $p wff x $= ho ho $.\n")))
+    (is (thrown-with-msg? ParseException #"Variable y must be assigned a type"
+                          (parse-mm-program "$c var wff $.\n$v x y $.\nvarx $f var x $.\nax1 $a wff x y $.\n")))))
 

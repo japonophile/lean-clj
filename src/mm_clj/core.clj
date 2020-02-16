@@ -161,14 +161,17 @@
              :ok))
          symbols)))
 
-(defn- check-essential
-  "check an essential hypothesis statement in the program parse tree"
-  [[[_ label] [_ [_ typecode]] & symbols] state]
-  (let [state (add-label label state)
-        _ (check-symbols symbols state)]
-    (if (not-any? #{typecode} (:constants state))
-      (throw (ParseException. (str "Type " typecode " not found in constants")))
-      (assoc-in state [:essentials label] {:type typecode :symbols (vec symbols)}))))
+(defn- check-variables-have-type
+  "check all variables have an active floating statement (i.e. have a type)"
+  [symbols state]
+  (doall
+    (map (fn [s]
+           (if-let [_ (get (:variables state) s)]
+             (if (not-any? #(= s (:variable (second %))) (:floatings state))
+               (throw (ParseException. (str "Variable " s " must be assigned a type")))
+               :ok)
+             :not-variable))
+         symbols)))
 
 (defn- check-unique
   "check that each variable is unique"
@@ -196,19 +199,25 @@
         _ (doall (map #(get-active-variable % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
-(defn- check-assertion
-  "check an assertion (axiom or provable) statement in the program parse tree"
+(defn- check-assertion-or-essential
+  "check an assertion (axiom or provable) or essential hypothesis statement in the program parse tree"
   [assertion-type [[_ label] [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
-        _ (check-symbols symbols state)]
+        _ (check-symbols symbols state)
+        _ (check-variables-have-type symbols state)]
     (if (not-any? #{typecode} (:constants state))
       (throw (ParseException. (str "Type " typecode " not found in constants")))
       (assoc-in state [assertion-type label] {:type typecode :symbols (vec symbols)}))))
 
+(defn- check-essential
+  "check an essential hypothesis statement in the program parse tree"
+  [tree state]
+  (check-assertion-or-essential :essentials tree state))
+
 (defn- check-axiom
   "check an axiom statement in the program parse tree"
   [tree state]
-  (check-assertion :axioms tree state))
+  (check-assertion-or-essential :axioms tree state))
 
 (defn- check-labels
   "check all labels are defined"
@@ -230,7 +239,7 @@
 (defn- check-provable
   "check an axiom statement in the program parse tree"
   [tree state]
-  (let [state (check-assertion :provables (butlast tree) state)
+  (let [state (check-assertion-or-essential :provables (butlast tree) state)
         [[_ label] & _] tree]
     (check-proof label (last tree) state)))
 

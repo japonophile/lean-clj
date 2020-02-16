@@ -255,10 +255,15 @@
       (reduce #(check-program %2 %1) state children)
       state)))
 
-(defn- mandatory-variables
+(defn mandatory-variables
   "return the set of mandatory variables of an assertion"
-  [assertion state]
-  #{})
+  [assertion]
+  (into #{}
+        (apply concat
+               (conj (map (fn [e]
+                            (filter #(some #{%} (-> assertion :scope :variables)) (:symbols e)))
+                          (vals (-> assertion :scope :essentials)))
+                     (filter #(some #{%} (-> assertion :scope :variables)) (:symbols assertion))))))
 
 (defn parse-mm-program
   "parse a metamath program"

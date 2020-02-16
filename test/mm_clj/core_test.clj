@@ -1,6 +1,6 @@
 (ns mm-clj.core-test
   (:require
-    [mm-clj.core :refer [strip-comments load-includes parse-mm-program]]
+    [mm-clj.core :refer [strip-comments load-includes parse-mm-program mandatory-variables]]
     [clojure.test :refer [deftest is testing]])
   (:import
     [mm-clj ParseException]))
@@ -162,3 +162,10 @@
     (is (thrown-with-msg? ParseException #"Variable y matches an existing label"
                           (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\ny $a wff x $.\n$v y $.\n")))))
 
+(deftest mandatory-elements
+  (testing "The set of mandatory variables associated with an assertion is the set of (zero or more) variables in the assertion and in any active $e statements."
+    (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\nax1 $a wff = x z $.\n")]
+      (is (= #{"x" "z"} (mandatory-variables (get (:axioms state) "ax1")))))
+    (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\nax1 $a wff = x z $.\n")]
+      (is (= #{"x" "y" "z"} (mandatory-variables (get (:axioms state) "ax1")))))
+    ))

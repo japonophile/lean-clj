@@ -143,5 +143,15 @@
     (is (thrown-with-msg? ParseException #"Variable x must be assigned a type"
                           (parse-mm-program "$c var wff $.\n$v x $.\nho $a wff $.\np1 $p wff x $= ho ho $.\n")))
     (is (thrown-with-msg? ParseException #"Variable y must be assigned a type"
-                          (parse-mm-program "$c var wff $.\n$v x y $.\nvarx $f var x $.\nax1 $a wff x y $.\n")))))
+                          (parse-mm-program "$c var wff $.\n$v x y $.\nvarx $f var x $.\nax1 $a wff x y $.\n"))))
+  (testing "Each label token must be unique"
+    (is (thrown-with-msg? ParseException #"Label ax1 was already defined before"
+                          (parse-mm-program "$c var wff $.\n$v x $.\nvarx $f var x $.\nax1 $a wff x $.\nax1 $a wff $.\n")))
+    (is (thrown-with-msg? ParseException #"Label ax1 was already defined before"
+                          (parse-mm-program "$c var wff $.\n$v x $.\n${ varx $f var x $.\nax1 $a wff x $. $}\nvarxx $f var x $.\nax1 $a wff $.\n"))))
+  (testing "no label token may match any math symbol token."
+    (is (thrown-with-msg? ParseException #"Label ax1 matches a constant"
+                          (parse-mm-program "$c var wff ax1 $.\n$v x $.\nvarx $f var x $.\nax1 $a wff x $.\n")))
+    (is (thrown-with-msg? ParseException #"Label ax1 matches a variable"
+                          (parse-mm-program "$c var wff $.\n$v x ax1 $.\nvarx $f var x $.\nax1 $a wff x $.\n")))))
 

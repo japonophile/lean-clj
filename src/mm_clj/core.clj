@@ -86,12 +86,16 @@
   [l state]
   (if (some #{l} (:labels state))
     (throw (ParseException. (str "Label " l " was already defined before")))
-    (assoc state :labels (conj (:labels state) l))))
+    (if (some #{l} (:constants state))
+      (throw (ParseException. (str "Label " l " matches a constant")))
+      (if (contains? (:variables state) l)
+        (throw (ParseException. (str "Label " l " matches a variable")))
+        (assoc state :labels (conj (:labels state) l))))))
 
 (defn- active-variables
   "get active variables"
   [state]
-  (map #(first %) (filter #(true? (:active %)) (:variables state))))
+  (map #(first %) (filter #(true? (:active (second %))) (:variables state))))
 
 (defn- deactivate-vars
   "deactivate variables that should not be active"
@@ -116,7 +120,7 @@
   "set the type of a variable"
   [variable typecode state]
   (let [v (get-active-variable variable state)]
-    (if (:type v)
+    (if (and (:type v) (not= typecode (:type v)))
       (throw (ParseException. (str "Variable " variable " was previously assigned type " (:type v))))
       (if (nil? (get (:constants state) typecode))
         (throw (ParseException. (str "Type " typecode " not found in constants")))

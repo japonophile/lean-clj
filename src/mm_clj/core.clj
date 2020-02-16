@@ -61,7 +61,8 @@
          rootdir (.getParent (io/file filename))]
      (load-includes program included-files rootdir))))
 
-(defrecord ParserState [constants variables labels floatings essentials disjoints axioms provables])
+(defrecord Scope [variables floatings essentials disjoints])
+(defrecord ParserState [constants variables labels scope axioms provables])
 
 (defn- add-constant
   "add constant to the parser state"
@@ -76,17 +77,18 @@
 
 (defn- add-variable
   "add variable to the parser state"
-  [variable state]
-  (if (some #{variable} (:constants state))
-    (throw (ParseException. (str "Variable " variable " matches an existing constant")))
-    (if (some #{variable} (:labels state))
-      (throw (ParseException. (str "Variable " variable " matches an existing label")))
-      (let [v (get (:variables state) variable)]
-        (if (and v (:active v))
-          (throw (ParseException. (str "Variable " variable " was already defined before")))
-          (if v
-            (assoc-in state [:variables variable :active] true)  ; variable exists -> make active (do not erase type)
-            (assoc-in state [:variables variable] {:type nil :active true})))))))  ; variable does not exist -> add it
+  [v state]
+  (if (some #{v} (:constants state))
+    (throw (ParseException. (str "Variable " v " matches an existing constant")))
+    (if (some #{v} (:labels state))
+      (throw (ParseException. (str "Variable " v " matches an existing label")))
+      (let [active-vars (-> state :scope :variables)]
+        (if (some #{v} active-vars)
+          (throw (ParseException. (str "Variable " v " was already defined before")))
+          (let [state (assoc-in state [:scope :variables] (conj active-vars v))]
+            (if (not (contains? (:variables state) v))
+              (assoc-in state [:variables v] {:type nil})
+              state)))))))
 
 (defn- add-label
   "add label to the parser state"
@@ -99,29 +101,14 @@
         (throw (ParseException. (str "Label " l " matches a variable")))
         (assoc state :labels (conj (:labels state) l))))))
 
-(defn- active-variables
-  "get active variables"
-  [state]
-  (map #(first %) (filter #(true? (:active (second %))) (:variables state))))
-
-(defn- deactivate-vars
-  "deactivate variables that should not be active"
-  [variables active-vars]
-  (into {} (map (fn [[k v]]
-                  (if (not (some #{k} active-vars))
-                    [k (assoc v :active false)]
-                    [k v]))
-                variables)))
-
 (defn- get-active-variable
   "get a variable, ensuring it is defined and active"
   [variable state]
-  (let [v (get (:variables state) variable)]
-    (if (nil? v)
-      (throw (ParseException. (str "Variable " variable " not defined")))
-      (if (not (:active v))
-        (throw (ParseException. (str "Variable " variable " not active")))
-        v))))
+  (if-let [v (get (:variables state) variable)]
+    (if (some #{variable} (-> state :scope :variables))
+      v
+      (throw (ParseException. (str "Variable " variable " not active"))))
+    (throw (ParseException. (str "Variable " variable " not defined")))))
 
 (defn- set-var-type
   "set the type of a variable"
@@ -138,37 +125,28 @@
 (defn- check-block
   "check a block in the program parse tree"
   [block-stmts state]
-  ; save active vars, hypotheses and disjoints
-  (let [active-vars (active-variables state)
-        floatings   (:floatings state)
-        essentials  (:essentials state)
-        disjoints   (:disjoints state)
+  ; save scope
+  (let [scope (:scope state)
         ; parse block
         state (reduce #(check-program %2 %1) state block-stmts)]
-        ; revert active vars, hypotheses and disjoints
-    (-> state
-        (assoc :variables  (deactivate-vars (:variables state) active-vars))
-        (assoc :floatings  floatings)
-        (assoc :essentials essentials)
-        (assoc :disjoints  disjoints))))
+    ; revert scope
+    (assoc state :scope scope)))
 
 (defn- check-floating
   "check a floating hypothesis statement in the program parse tree"
   [[[_ label] [_ [_ typecode]] [_ variable]] state]
   (let [state (add-label label state)
         state (set-var-type variable typecode state)]
-    (assoc-in state [:floatings label] {:variable variable :type typecode})))
+    (assoc-in state [:scope :floatings label] {:variable variable :type typecode})))
 
 (defn- check-symbols
   "check all symbols are defined and active"
   [symbols state]
   (doall
     (map (fn [s]
-           (if (not-any? #{s} (:constants state))
-             (let [v (get (:variables state) s)]
-               (if (or (nil? v) (false? (:active v)))
-                 (throw (ParseException. (str "Variable or constant " s " not defined")))
-                 :ok))
+           (if (and (not-any? #{s} (:constants state))
+                    (not-any? #{s} (-> state :scope :variables)))
+             (throw (ParseException. (str "Variable or constant " s " not defined")))
              :ok))
          symbols)))
 
@@ -177,12 +155,22 @@
   [symbols state]
   (doall
     (map (fn [s]
-           (if-let [_ (get (:variables state) s)]
-             (if (not-any? #(= s (:variable (second %))) (:floatings state))
+           (if (some #{s} (-> state :scope :variables))
+             (if (not-any? #(= s (:variable (second %))) (-> state :scope :floatings))
                (throw (ParseException. (str "Variable " s " must be assigned a type")))
                :ok)
              :not-variable))
          symbols)))
+
+(defn- check-essential
+  "check an essential hypothesis statement in the program parse tree"
+  [[[_ label] [_ [_ typecode]] & symbols] state]
+  (let [state (add-label label state)
+        _ (check-symbols symbols state)
+        _ (check-variables-have-type symbols state)]
+    (if (not-any? #{typecode} (:constants state))
+      (throw (ParseException. (str "Type " typecode " not found in constants")))
+      (assoc-in state [:scope :essentials label] {:type typecode :symbols (vec symbols)}))))
 
 (defn- check-unique
   "check that each variable is unique"
@@ -196,11 +184,11 @@
 (defn- add-disjoint
   "add a disjoint pair to the state"
   [[x y] state]
-  (let [disjoints (:disjoints state)
+  (let [disjoints (-> state :scope :disjoints)
         pair (sort [x y])]
     (if (some #{pair} disjoints)
       (throw (ParseException. (str "Disjoint variable restriction " pair " already defined")))
-      (assoc state :disjoints (conj disjoints pair)))))
+      (assoc-in state [:scope :disjoints] (conj disjoints pair)))))
 
 (defn- check-disjoint
   "check a disjoint statement in the program parse tree"
@@ -210,25 +198,20 @@
         _ (doall (map #(get-active-variable % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
-(defn- check-assertion-or-essential
-  "check an assertion (axiom or provable) or essential hypothesis statement in the program parse tree"
+(defn- check-assertion
+  "check an assertion (axiom or provable) statement in the program parse tree"
   [assertion-type [[_ label] [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
         _ (check-symbols symbols state)
         _ (check-variables-have-type symbols state)]
     (if (not-any? #{typecode} (:constants state))
       (throw (ParseException. (str "Type " typecode " not found in constants")))
-      (assoc-in state [assertion-type label] {:type typecode :symbols (vec symbols)}))))
-
-(defn- check-essential
-  "check an essential hypothesis statement in the program parse tree"
-  [tree state]
-  (check-assertion-or-essential :essentials tree state))
+      (assoc-in state [assertion-type label] {:type typecode :symbols (vec symbols) :scope (:scope state)}))))
 
 (defn- check-axiom
   "check an axiom statement in the program parse tree"
   [tree state]
-  (check-assertion-or-essential :axioms tree state))
+  (check-assertion :axioms tree state))
 
 (defn- check-labels
   "check all labels are defined"
@@ -250,7 +233,7 @@
 (defn- check-provable
   "check an axiom statement in the program parse tree"
   [tree state]
-  (let [state (check-assertion-or-essential :provables (butlast tree) state)
+  (let [state (check-assertion :provables (butlast tree) state)
         [[_ label] & _] tree]
     (check-proof label (last tree) state)))
 
@@ -272,13 +255,18 @@
       (reduce #(check-program %2 %1) state children)
       state)))
 
+(defn- mandatory-variables
+  "return the set of mandatory variables of an assertion"
+  [assertion state]
+  #{})
+
 (defn parse-mm-program
   "parse a metamath program"
   [program]
   (let [tree (mm-parser program)]
     (if (instance? Failure tree)
       (throw (ParseException. (str (:reason tree))))
-      (check-program tree (ParserState. #{} {} #{} {} {} #{} {} {})))))
+      (check-program tree (ParserState. #{} {} #{} (Scope. #{} {} {} #{}) {} {})))))
 
 (defn parse-mm
   "parse a metamath file"

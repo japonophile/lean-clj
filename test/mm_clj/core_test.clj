@@ -27,33 +27,33 @@
         slurp-mocked   (fn [filename]
                          (case filename
                            ; filename       ; file content
-                           "abc.mm"           "$c a b c $.\n"
-                           "xyz.mm"           "$v x y z $.\n"
-                           "xyz-comment.mm"   "$c wff $.\n$( comment $)\n$v x y z $.\n"
-                           "xyz-include.mm"   "$c wff $.\n$[ abc.mm $]\n$v x y z $.\n"
-                           "xyz-include2.mm"  "$c wff $.\n$[ abc.mm $]\n$[ root.mm $]\n$v x y z $.\n"
-                           "wrong-include.mm" "$c a $.\n${ $[ xyz.mm $] $}\n$v n $.\n"
-                           "root.mm"          "this file should not be read"
+                           "./abc.mm"           "$c a b c $.\n"
+                           "./xyz.mm"           "$v x y z $.\n"
+                           "./xyz-comment.mm"   "$c wff $.\n$( comment $)\n$v x y z $.\n"
+                           "./xyz-include.mm"   "$c wff $.\n$[ abc.mm $]\n$v x y z $.\n"
+                           "./xyz-include2.mm"  "$c wff $.\n$[ abc.mm $]\n$[ root.mm $]\n$v x y z $.\n"
+                           "./wrong-include.mm" "$c a $.\n${ $[ xyz.mm $] $}\n$v n $.\n"
+                           "./root.mm"          ""
                            (slurp-original filename)))]
     (with-redefs [slurp slurp-mocked]
       (testing "A file inclusion command consists of $[ followed by a file name followed by $]."
         (is (= "$c a $.\n$v x y z $.\n\n$v n $.\n"
-               (first (load-includes "$c a $.\n$[ xyz.mm $]\n$v n $.\n" ["root.mm"]))))
+               (first (load-includes "$c a $.\n$[ xyz.mm $]\n$v n $.\n" ["root.mm"] "."))))
         (is (= "$c a $.\n$c wff $.\n\n$v x y z $.\n\n$v n $.\n"
-               (first (load-includes "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n" ["root.mm"])))))
+               (first (load-includes "$c a $.\n$[ xyz-comment.mm $]\n$v n $.\n" ["root.mm"] ".")))))
       (testing "It is only allowed in the outermost scope (i.e., not between ${ and $})"
         (is (thrown-with-msg? ParseException #".*:expecting \"\$}\".*"
-                              (load-includes "$[ wrong-include.mm $]\n" ["root.mm"]))))
+                              (load-includes "$[ wrong-include.mm $]\n" ["root.mm"] "."))))
       (testing "nested inclusion"
         (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n"
-               (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n" ["root.mm"]))))
+               (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n" ["root.mm"] "."))))
         (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n\n$v x y z $.\n\n$v n $.\n"
-               (first (load-includes "$c a $.\n$[ xyz-include2.mm $]\n$v n $.\n" ["root.mm"])))))
+               (first (load-includes "$c a $.\n$[ xyz-include2.mm $]\n$v n $.\n" ["root.mm"] ".")))))
       (testing "no multiple inclusion"
         (is (= "$c a $.\n\n$v n $.\n"
-               (first (load-includes "$c a $.\n$[ root.mm $]\n$v n $.\n" ["root.mm"]))))
+               (first (load-includes "$c a $.\n$[ root.mm $]\n$v n $.\n" ["root.mm"] "."))))
         (is (= "$c a $.\n$c wff $.\n$c a b c $.\n\n$v x y z $.\n\n$v n $.\n\n"
-               (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n$[ abc.mm $]\n" ["root.mm"]))))))))
+               (first (load-includes "$c a $.\n$[ xyz-include.mm $]\n$v n $.\n$[ abc.mm $]\n" ["root.mm"] "."))))))))
 
 (deftest variables-and-constants
   (testing "The same math symbol may not occur twice in a given $v or $c statement"
@@ -62,7 +62,7 @@
     (is (thrown-with-msg? ParseException #"Variable x was already defined before"
                           (parse-mm-program "$v x y x $.\n"))))
   (testing "A math symbol becomes active when declared and stays active until the end of the block in which it is declared."
-    (is (true? (:active (get (:variables (parse-mm-program "$v x y $.\n")) "x")))))
+    (is (get (-> (parse-mm-program "$v x y $.\n") :scope :variables) "x")))
   (testing "A constant must be declared in the outermost block"
     (is (record? (parse-mm-program "$c a b c $.\n${\n  $v x y $.\n$}\n$c d e f $.\n")))
     (is (thrown-with-msg? ParseException #".*:expecting \"\$}\".*"

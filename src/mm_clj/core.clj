@@ -266,6 +266,22 @@
                           (vals (-> assertion :scope :essentials)))
                      (filter #(some #{%} (-> assertion :scope :variables)) (:symbols assertion))))))
 
+(defn mandatory-hypotheses
+  "return the list of mandatory hypothese of an assertion in order of appearance"
+  [assertion state]
+  (sort-by
+    #(.indexOf (:labels state) %)
+    (into []
+          (concat 
+            (let [mvars (mandatory-variables assertion)]
+              (map (fn [v]
+                     (first (keep (fn [[label floating]]
+                                    (when (= v (:variable floating))
+                                      label))
+                                  (-> assertion :scope :floatings))))
+                   mvars))
+            (keys (-> assertion :scope :essentials))))))
+
 (defn parse-mm-program
   "parse a metamath program"
   [program]

@@ -1,6 +1,6 @@
 (ns mm-clj.core-test
   (:require
-    [mm-clj.core :refer [strip-comments load-includes parse-mm-program mandatory-variables]]
+    [mm-clj.core :refer [strip-comments load-includes parse-mm-program mandatory-variables mandatory-hypotheses]]
     [clojure.test :refer [deftest is testing]])
   (:import
     [mm-clj ParseException]))
@@ -167,5 +167,12 @@
     (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\nax1 $a wff = x z $.\n")]
       (is (= #{"x" "z"} (mandatory-variables (get (:axioms state) "ax1")))))
     (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\nax1 $a wff = x z $.\n")]
-      (is (= #{"x" "y" "z"} (mandatory-variables (get (:axioms state) "ax1")))))
-    ))
+      (is (= #{"x" "y" "z"} (mandatory-variables (get (:axioms state) "ax1"))))))
+  (testing "The (possibly empty) set of mandatory hypotheses is the set of all active $f statements containing mandatory variables, together with all active $e statements."
+    (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\nax1 $a wff = x z $.\n")]
+      (is (= ["varx" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") state))))
+    (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\nax1 $a wff = x z $.\n")]
+      (is (= ["varx" "vary" "varz" "min"] (mandatory-hypotheses (get (:axioms state) "ax1") state))))
+    (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvary $f var y $.\nvarx $f var x $.\nmin $e wff = x y $.\nvarz $f var z $.\nax1 $a wff = x z $.\n")]
+      (is (= ["vary" "varx" "min" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") state))))))
+

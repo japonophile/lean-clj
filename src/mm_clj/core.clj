@@ -282,6 +282,16 @@
                    mvars))
             (keys (-> assertion :scope :essentials))))))
 
+(defn mandatory-disjoints
+  "return the set of disjoint statements of an assertion"
+  [assertion]
+  (let [mvars (mandatory-variables assertion)]
+    (into #{}
+          (filter (fn [[x y]]
+                    (and (some #{x} mvars)
+                         (some #{y} mvars)))
+                  (-> assertion :scope :disjoints)))))
+
 (defn parse-mm-program
   "parse a metamath program"
   [program]

@@ -1,6 +1,7 @@
 (ns mm-clj.core-test
   (:require
-    [mm-clj.core :refer [strip-comments load-includes parse-mm-program mandatory-variables mandatory-hypotheses]]
+    [mm-clj.core :refer [strip-comments load-includes parse-mm-program 
+                         mandatory-variables mandatory-hypotheses mandatory-disjoints]]
     [clojure.test :refer [deftest is testing]])
   (:import
     [mm-clj ParseException]))
@@ -174,5 +175,12 @@
     (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\nax1 $a wff = x z $.\n")]
       (is (= ["varx" "vary" "varz" "min"] (mandatory-hypotheses (get (:axioms state) "ax1") state))))
     (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvary $f var y $.\nvarx $f var x $.\nmin $e wff = x y $.\nvarz $f var z $.\nax1 $a wff = x z $.\n")]
-      (is (= ["vary" "varx" "min" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") state))))))
+      (is (= ["vary" "varx" "min" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") state)))))
+  (testing "The set of mandatory $d statements associated with an assertion are those active $d statements whose variables are both among the assertion’s mandatory variables."
+    (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\n$d x y $.\n$d y z $.\n$d x z $.\nax1 $a wff = x z $.\n")]
+      (is (= #{["x" "z"]} (mandatory-disjoints (get (:axioms state) "ax1")))))
+    (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\n$d x y $.\n$d y z $.\nmin $e wff = x z $.\nax1 $a wff = x z $.\n")]
+      (is (= #{} (mandatory-disjoints (get (:axioms state) "ax1")))))
+    (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\n$d x y $.\n$d y z $.\n$d x z $.\nmin $e = y y $.\nax1 $a wff = x z $.\n")]
+      (is (= #{["x" "y"] ["x" "z"] ["y" "z"]} (mandatory-disjoints (get (:axioms state) "ax1")))))))
 

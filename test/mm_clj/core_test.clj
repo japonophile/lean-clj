@@ -113,7 +113,7 @@
     (is (record? (parse-mm-program "$v x y $.\n$d x y $.\n")))
     (is (thrown-with-msg? ParseException #"Variable x appears more than once in a disjoint statement"
                           (parse-mm-program "$v x y $.\n$d x x $.\n")))
-    (is (thrown-with-msg? ParseException #"Variable x not defined"
+    (is (thrown-with-msg? ParseException #"Variable x not active"
                           (parse-mm-program "$v y $.\n$d x y $.\n")))
     (is (thrown-with-msg? ParseException #"Variable x not active"
                           (parse-mm-program "$v y $.\n${ $v x $. $}\n$d x y $.\n"))))

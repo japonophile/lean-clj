@@ -62,14 +62,14 @@
      (load-includes program included-files rootdir))))
 
 (defrecord Scope [variables floatings essentials disjoints])
-(defrecord ParserState [constants variables labels scope axioms provables])
+(defrecord ParserState [constants vartypes labels axioms provables scope])
 
 (defn- add-constant
   "add constant to the parser state"
   [c state]
   (if (some #{c} (:constants state))
     (throw (ParseException. (str "Constant " c " was already defined before")))
-    (if (contains? (:variables state) c)
+    (if (contains? (:vartypes state) c)
       (throw (ParseException. (str "Constant " c " was previously defined as a variable before")))
       (if (some #{c} (:labels state))
         (throw (ParseException. (str "Constant " c " matches an existing label")))
@@ -86,8 +86,8 @@
         (if (some #{v} active-vars)
           (throw (ParseException. (str "Variable " v " was already defined before")))
           (let [state (assoc-in state [:scope :variables] (conj active-vars v))]
-            (if (not (contains? (:variables state) v))
-              (assoc-in state [:variables v] {:type nil})
+            (if (not (contains? (:vartypes state) v))
+              (assoc-in state [:vartypes v] nil)
               state)))))))
 
 (defn- add-label
@@ -97,28 +97,34 @@
     (throw (ParseException. (str "Label " l " was already defined before")))
     (if (some #{l} (:constants state))
       (throw (ParseException. (str "Label " l " matches a constant")))
-      (if (contains? (:variables state) l)
+      (if (contains? (:vartypes state) l)
         (throw (ParseException. (str "Label " l " matches a variable")))
         (assoc state :labels (conj (:labels state) l))))))
 
-(defn- get-active-variable
-  "get a variable, ensuring it is defined and active"
-  [variable state]
-  (if-let [v (get (:variables state) variable)]
-    (if (some #{variable} (-> state :scope :variables))
-      v
-      (throw (ParseException. (str "Variable " variable " not active"))))
-    (throw (ParseException. (str "Variable " variable " not defined")))))
+(defn- check-variable-active
+  "check that a variable is (defined and) active"
+  [v state]
+  (when (not-any? #{v} (-> state :scope :variables))
+    (throw (ParseException. (str "Variable " v " not active")))))
 
-(defn- set-var-type
-  "set the type of a variable"
-  [variable typecode state]
-  (let [v (get-active-variable variable state)]
-    (if (and (:type v) (not= typecode (:type v)))
-      (throw (ParseException. (str "Variable " variable " was previously assigned type " (:type v))))
+(defn- get-active-variable-type
+  "get the type of a variable, ensuring it is defined and active"
+  [v state]
+  (if (contains? (:vartypes state) v)
+    (do
+      (check-variable-active v state)
+      (get (:vartypes state) v))
+    (throw (ParseException. (str "Variable " v " not defined")))))
+
+(defn- set-active-variable-type
+  "set the type of an active variable"
+  [v typecode state]
+  (let [t (get-active-variable-type v state)]
+    (if (and t (not= typecode t))
+      (throw (ParseException. (str "Variable " v " was previously assigned type " t)))
       (if (nil? (get (:constants state) typecode))
         (throw (ParseException. (str "Type " typecode " not found in constants")))
-        (assoc-in state [:variables variable :type] typecode)))))
+        (assoc-in state [:vartypes v] typecode)))))
 
 (def check-program)
 
@@ -136,7 +142,7 @@
   "check a floating hypothesis statement in the program parse tree"
   [[[_ label] [_ [_ typecode]] [_ variable]] state]
   (let [state (add-label label state)
-        state (set-var-type variable typecode state)]
+        state (set-active-variable-type variable typecode state)]
     (assoc-in state [:scope :floatings label] {:variable variable :type typecode})))
 
 (defn- check-symbols
@@ -144,10 +150,9 @@
   [symbols state]
   (doall
     (map (fn [s]
-           (if (and (not-any? #{s} (:constants state))
-                    (not-any? #{s} (-> state :scope :variables)))
-             (throw (ParseException. (str "Variable or constant " s " not defined")))
-             :ok))
+           (when (and (not-any? #{s} (:constants state))
+                      (not-any? #{s} (-> state :scope :variables)))
+             (throw (ParseException. (str "Variable or constant " s " not defined")))))
          symbols)))
 
 (defn- check-variables-have-type
@@ -155,11 +160,9 @@
   [symbols state]
   (doall
     (map (fn [s]
-           (if (some #{s} (-> state :scope :variables))
-             (if (not-any? #(= s (:variable (second %))) (-> state :scope :floatings))
-               (throw (ParseException. (str "Variable " s " must be assigned a type")))
-               :ok)
-             :not-variable))
+           (when (some #{s} (-> state :scope :variables))
+             (when (not-any? #(= s (:variable (second %))) (-> state :scope :floatings))
+               (throw (ParseException. (str "Variable " s " must be assigned a type"))))))
          symbols)))
 
 (defn- check-essential
@@ -172,13 +175,12 @@
       (throw (ParseException. (str "Type " typecode " not found in constants")))
       (assoc-in state [:scope :essentials label] {:type typecode :symbols (vec symbols)}))))
 
-(defn- check-unique
+(defn- check-variables-unique
   "check that each variable is unique"
   [variables]
   (doall
-    (map #(if (< 1 (second %))
-            (throw (ParseException.  (str "Variable " (first %) " appears more than once in a disjoint statement")))
-            :ok)
+    (map #(when (< 1 (second %))
+            (throw (ParseException.  (str "Variable " (first %) " appears more than once in a disjoint statement"))))
          (frequencies variables))))
 
 (defn- add-disjoint
@@ -194,8 +196,8 @@
   "check a disjoint statement in the program parse tree"
   [variables state]
   (let [vs (map second variables)
-        _ (check-unique vs)
-        _ (doall (map #(get-active-variable % state) vs))]
+        _ (check-variables-unique vs)
+        _ (doall (map #(check-variable-active % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
 (defn- check-assertion
@@ -216,9 +218,8 @@
 (defn- check-labels
   "check all labels are defined"
   [labels state]
-  (doall (map #(if (not-any? #{%} (:labels state))
-                 (throw (ParseException. (str "Label " % " not defined")))
-                 :ok)
+  (doall (map #(when (not-any? #{%} (:labels state))
+                 (throw (ParseException. (str "Label " % " not defined"))))
               labels)))
 
 (defn- check-proof
@@ -271,7 +272,7 @@
   (let [tree (mm-parser program)]
     (if (instance? Failure tree)
       (throw (ParseException. (str (:reason tree))))
-      (check-program tree (ParserState. #{} {} #{} (Scope. #{} {} {} #{}) {} {})))))
+      (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{}))))))
 
 (defn parse-mm
   "parse a metamath file"

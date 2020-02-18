@@ -320,13 +320,8 @@
 
 (defn apply-substitutions
   "Apply substitutions to a list of symbols"
-  ([subst symbols constants]
-   (apply-substitutions subst symbols constants []))
-  ([subst [s & symbols] constants result]
-   (if (nil? s)
-     result
-     (let [r (if (some #{s} constants) [s] (get subst s))]
-       (apply-substitutions subst symbols constants (vec (concat result r)))))))
+  [subst symbols constants]
+  (vec (apply concat (map #(if (some #{%} constants) [%] (get subst %)) symbols))))
 
 (defn apply-axiom
   "Apply an axiom"

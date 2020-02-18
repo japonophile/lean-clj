@@ -128,7 +128,7 @@
 
 (def check-program)
 
-(defn- check-block
+(defn- check-block-stmt
   "check a block in the program parse tree"
   [block-stmts state]
   ; save scope
@@ -138,7 +138,7 @@
     ; revert scope
     (assoc state :scope scope)))
 
-(defn- check-floating
+(defn- check-floating-stmt
   "check a floating hypothesis statement in the program parse tree"
   [[[_ label] [_ [_ typecode]] [_ variable]] state]
   (let [state (add-label label state)
@@ -165,7 +165,7 @@
                (throw (ParseException. (str "Variable " s " must be assigned a type"))))))
          symbols)))
 
-(defn- check-essential
+(defn- check-essential-stmt
   "check an essential hypothesis statement in the program parse tree"
   [[[_ label] [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
@@ -192,7 +192,7 @@
       (throw (ParseException. (str "Disjoint variable restriction " pair " already defined")))
       (assoc-in state [:scope :disjoints] (conj disjoints pair)))))
 
-(defn- check-disjoint
+(defn- check-disjoint-stmt
   "check a disjoint statement in the program parse tree"
   [variables state]
   (let [vs (map second variables)
@@ -200,7 +200,7 @@
         _ (doall (map #(check-variable-active % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
-(defn- check-assertion
+(defn- check-assertion-stmt
   "check an assertion (axiom or provable) statement in the program parse tree"
   [assertion-type [[_ label] [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
@@ -210,10 +210,10 @@
       (throw (ParseException. (str "Type " typecode " not found in constants")))
       (assoc-in state [assertion-type label] {:type typecode :symbols (vec symbols) :scope (:scope state)}))))
 
-(defn- check-axiom
+(defn- check-axiom-stmt
   "check an axiom statement in the program parse tree"
   [tree state]
-  (check-assertion :axioms tree state))
+  (check-assertion-stmt :axioms tree state))
 
 (defn- check-labels
   "check all labels are defined"
@@ -231,10 +231,10 @@
                               _ (check-labels labels state)]
                           (assoc-in state [:provables label :proof] labels))))
 
-(defn- check-provable
+(defn- check-provable-stmt
   "check an axiom statement in the program parse tree"
   [tree state]
-  (let [state (check-assertion :provables (butlast tree) state)
+  (let [state (check-assertion-stmt :provables (butlast tree) state)
         [[_ label] & _] tree]
     (check-proof label (last tree) state)))
 
@@ -246,12 +246,12 @@
   (case node-type
     :constant-stmt  (reduce #(add-constant (second %2) %1) state children)
     :variable-stmt  (reduce #(add-variable (second %2) %1) state children)
-    :floating-stmt  (check-floating children state)
-    :essential-stmt (check-essential children state)
-    :disjoint-stmt  (check-disjoint children state)
-    :axiom-stmt     (check-axiom children state)
-    :provable-stmt  (check-provable children state)
-    :block          (check-block children state)
+    :floating-stmt  (check-floating-stmt children state)
+    :essential-stmt (check-essential-stmt children state)
+    :disjoint-stmt  (check-disjoint-stmt children state)
+    :axiom-stmt     (check-axiom-stmt children state)
+    :provable-stmt  (check-provable-stmt children state)
+    :block          (check-block-stmt children state)
     (if (vector? (first children))
       (reduce #(check-program %2 %1) state children)
       state)))
@@ -300,10 +300,79 @@
       (throw (ParseException. (str (:reason tree))))
       (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{}))))))
 
+(defn find-substitutions
+  "Perform unification"
+  [[s & stack] [h & hypos] scope subst]
+  (println (str "find-substitutions " [[s stack] [h hypos] subst]))
+  (if (nil? s)
+    subst
+    (if-let [f (get (:floatings scope) h)]
+      (if (= (:type f) (:type s))
+        (if-let [subvar (get subst (:variable f))]
+          (if (= subvar (:symbols s))
+            (find-substitutions stack hypos scope subst)
+            (throw (ParseException. (str "Proof verification failed (incompatible substitutions for variable " (:variable f) ")"))))
+          (find-substitutions stack hypos scope (assoc subst (:variable f) (:symbols s))))
+        (throw (ParseException. (str "Proof verification failed (type mismatch for variable " (:variable f) ")"))))
+      (if-let [e (get (:essentials scope) h)]
+        ; FIXME need to implement this
+        (find-substitutions stack hypos scope subst)))))
+
+(defn apply-substitutions
+  "Apply substitutions to a list of symbols"
+  ([subst symbols constants]
+   (apply-substitutions subst symbols constants []))
+  ([subst [s & symbols] constants result]
+   (if (nil? s)
+     (do
+       (println result)
+       result)
+     (let [r (if (some #{s} constants) [s] (get subst s))]
+       (apply-substitutions subst symbols constants (vec (concat result r)))))))
+
+(defn apply-axiom
+  "Apply an axiom"
+  [axiom state stack done-fn]
+  (let [mhypos (mandatory-hypotheses axiom state)
+        n (count mhypos)]
+    (if (<= n (count stack))
+      (let [subst (find-substitutions (take-last n stack) mhypos (:scope axiom) {})]
+        (done-fn
+          (conj (drop-last n stack)
+                {:type (:type axiom) :symbols (apply-substitutions subst (:symbols axiom) (:constants state))})))
+      (throw (ParseException. (str "Proof verification failed (stack empty)"))))))
+
+(defn verify-proof
+  "verify proof of a provable statement"
+  ([[_ {typecode :type symbols :symbols proof :proof scope :scope}] state]
+   (verify-proof typecode symbols proof scope state []))
+  ([typecode symbols [l & remaining-labels] scope state stack]
+   (println [[l remaining-labels] stack])
+   (if (nil? l)
+     (let [{t :type ss :symbols} (peek stack)]
+       (and (= typecode t) (= symbols ss) (empty? (pop stack))))
+     (if-let [floating (get (:floatings scope) l)]
+       (verify-proof typecode symbols remaining-labels scope state
+                     (conj stack {:type (:type floating) :symbols [(:variable floating)]}))
+       (if-let [essential (get (:essentials scope) l)]
+         (verify-proof typecode symbols remaining-labels scope state (conj stack essential))
+         (if-let [axiom (get (:axioms state) l)]
+           (apply-axiom axiom state stack
+                        (fn [stack]
+                          (verify-proof typecode symbols remaining-labels scope state stack)))
+           (throw (ParseException. (str "Proof verification failed (unrecognized label " l ")")))))))))
+
+(defn verify-proofs
+  "verify proofs of a parsed metamath program"
+  [state]
+  (doall
+    (map #(verify-proof % state) (-> state :provables)))
+  state)
+
 (defn parse-mm
   "parse a metamath file"
   [filename]
-  (parse-mm-program (read-file filename)))
+  (verify-proofs (parse-mm-program (read-file filename))))
 
 (defn -main
   "LEAN clojure"

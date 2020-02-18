@@ -1,7 +1,8 @@
 (ns mm-clj.core-test
   (:require
     [mm-clj.core :refer [strip-comments load-includes parse-mm-program 
-                         mandatory-variables mandatory-hypotheses mandatory-disjoints]]
+                         mandatory-variables mandatory-hypotheses mandatory-disjoints
+                         verify-proofs]]
     [clojure.test :refer [deftest is testing]])
   (:import
     [mm-clj ParseException]))
@@ -184,3 +185,15 @@
     (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\n$d x y $.\n$d y z $.\n$d x z $.\nmin $e = y y $.\nax1 $a wff = x z $.\n")]
       (is (= #{["x" "y"] ["x" "z"] ["y" "z"]} (mandatory-disjoints (get (:axioms state) "ax1")))))))
 
+(deftest proof-verification
+  (testing "Sample of 'The anatomy of a proof'"
+    (let [program "$c ( ) -> wff $.
+$v p q r s $.
+wp $f wff p $.
+wq $f wff q $.
+wr $f wff r $.
+ws $f wff s $.
+w2 $a wff ( p -> q ) $.
+wnew $p wff ( s -> ( r -> p ) ) $= ws wr wp w2 w2 $. "
+          state (parse-mm-program program)]
+      (is (record? (verify-proofs state))))))

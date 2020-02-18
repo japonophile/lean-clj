@@ -2,7 +2,7 @@
   (:require
     [clojure.java.io :as io]
     [clojure.math.combinatorics :refer [combinations]]
-    [clojure.string :refer [index-of includes?]]
+    [clojure.string :refer [index-of includes? join]]
     [instaparse.core :as insta])
   (:import
     instaparse.gll.Failure
@@ -303,7 +303,7 @@
 (defn find-substitutions
   "Perform unification"
   [[s & stack] [h & hypos] scope subst]
-  (println (str "find-substitutions " [[s stack] [h hypos] subst]))
+  ; (println (str "find-substitutions " [[s stack] [h hypos] subst]))
   (if (nil? s)
     subst
     (if-let [f (get (:floatings scope) h)]
@@ -324,9 +324,7 @@
    (apply-substitutions subst symbols constants []))
   ([subst [s & symbols] constants result]
    (if (nil? s)
-     (do
-       (println result)
-       result)
+     result
      (let [r (if (some #{s} constants) [s] (get subst s))]
        (apply-substitutions subst symbols constants (vec (concat result r)))))))
 
@@ -336,9 +334,9 @@
   (let [mhypos (mandatory-hypotheses axiom state)
         n (count mhypos)]
     (if (<= n (count stack))
-      (let [subst (find-substitutions (take-last n stack) mhypos (:scope axiom) {})]
+      (let [subst (find-substitutions (vec (take-last n stack)) mhypos (:scope axiom) {})]
         (done-fn
-          (conj (drop-last n stack)
+          (conj (vec (drop-last n stack))
                 {:type (:type axiom) :symbols (apply-substitutions subst (:symbols axiom) (:constants state))})))
       (throw (ParseException. (str "Proof verification failed (stack empty)"))))))
 
@@ -347,10 +345,12 @@
   ([[_ {typecode :type symbols :symbols proof :proof scope :scope}] state]
    (verify-proof typecode symbols proof scope state []))
   ([typecode symbols [l & remaining-labels] scope state stack]
-   (println [[l remaining-labels] stack])
+   ; (println [[l remaining-labels] stack])
    (if (nil? l)
      (let [{t :type ss :symbols} (peek stack)]
-       (and (= typecode t) (= symbols ss) (empty? (pop stack))))
+       (if-not (and (= typecode t) (= symbols ss) (empty? (pop stack)))
+         (throw (ParseException. (str "Proof verification failed (got " [t (join " " ss)]
+                                      " while expecting " [typecode (join " " symbols)] ")")))))
      (if-let [floating (get (:floatings scope) l)]
        (verify-proof typecode symbols remaining-labels scope state
                      (conj stack {:type (:type floating) :symbols [(:variable floating)]}))

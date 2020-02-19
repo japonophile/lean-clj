@@ -187,7 +187,8 @@
 
 (deftest proof-verification
   (testing "Sample of 'The anatomy of a proof'"
-    (let [program "$c ( ) -> wff $.
+    (let [program "
+$c ( ) -> wff $.
 $v p q r s $.
 wp $f wff p $.
 wq $f wff q $.
@@ -195,5 +196,24 @@ wr $f wff r $.
 ws $f wff s $.
 w2 $a wff ( p -> q ) $.
 wnew $p wff ( s -> ( r -> p ) ) $= ws wr wp w2 w2 $. "
+          state (parse-mm-program program)]
+      (is (record? (verify-proofs state)))))
+  (testing "MIU less trivial theorem"
+    (let [program "
+$c M I U |- wff $.
+$v x $.
+wx $f wff x $.
+we $a wff $.
+wM $a wff x M $.
+wI $a wff x I $.
+ax $a |- M I $.
+${
+  IIa $e |- M x $.
+  II  $a |- M x x $.
+$}
+lesstrivial $p |- M I I $=
+  we wI ax II
+$.
+"
           state (parse-mm-program program)]
       (is (record? (verify-proofs state))))))

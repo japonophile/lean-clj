@@ -243,8 +243,6 @@
 (defn- check-program
   "Check a program parse tree"
   [[node-type & children] state]
-  ; (println [node-type children])
-  ; (println state)
   (case node-type
     :constant-stmt  (reduce #(add-constant (second %2) %1) state children)
     :variable-stmt  (reduce #(add-variable (second %2) %1) state children)
@@ -257,6 +255,14 @@
     (if (vector? (first children))
       (reduce #(check-program %2 %1) state children)
       state)))
+
+(defn parse-mm-program
+  "Parse a metamath program"
+  [program]
+  (let [tree (mm-parser program)]
+    (if (instance? Failure tree)
+      (throw (ParseException. (str (:reason tree))))
+      (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{}))))))
 
 ;;; Proof verification stuff
 
@@ -296,14 +302,6 @@
                          (some #{y} mvars)))
                   (-> assertion :scope :disjoints)))))
 
-(defn parse-mm-program
-  "Parse a metamath program"
-  [program]
-  (let [tree (mm-parser program)]
-    (if (instance? Failure tree)
-      (throw (ParseException. (str (:reason tree))))
-      (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{}))))))
-
 (defn apply-substitutions
   "Apply substitutions to a list of symbols"
   [subst symbols constants]
@@ -312,7 +310,6 @@
 (defn find-substitutions
   "Perform unification"
   [[s & stack] [h & hypos] scope state subst]
-  ; (println (str "find-substitutions " [[s stack] [h hypos] subst]))
   (if (nil? s)
     subst
     (if-let [f (get (:floatings scope) h)]
@@ -324,6 +321,9 @@
           (find-substitutions stack hypos scope state (assoc subst (:variable f) (:symbols s))))
         (throw (ParseException. (str "Proof verification failed (type mismatch for variable " (:variable f) ")"))))
       (if-let [e (get (:essentials scope) h)]
+        ; since all variables in an essential hypothesis need to have associated floating hypothesis
+        ; all substitutions should be identified when we unify essential hypotheses, so we just
+        ; apply substitutions in the essential hypothesis and check it matches what's on the stack
         (if (= (:type e) (:type s))
           (if (= (apply-substitutions subst (:symbols e) (:constants state)) (:symbols s))
             (find-substitutions stack hypos scope state subst)
@@ -354,7 +354,6 @@
    (verify-proof typecode symbols proof scope state [])
    (println "OK!"))
   ([typecode symbols [l & remaining-labels] scope state stack]
-   ; (println [[l remaining-labels] stack])
    (if (nil? l)
      (let [{t :type ss :symbols} (peek stack)]
        (if-not (and (= typecode t) (= symbols ss) (empty? (pop stack)))

@@ -384,7 +384,7 @@
   (let [_ (print "Parsing program... ")
         program (parse-mm-program (read-file filename))
         _ (println "OK!")
-        result (if (not (empty? (:provables program)))
+        result (if (seq (:provables program))
                  (do
                    (println "Verifying proofs:")
                    (verify-proofs program)

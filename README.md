@@ -1,8 +1,8 @@
 # mm-clj
 
-A metamath parser written in Clojure
+A [metamath](http:us.metamath.org) parser written in Clojure.
 
-... inspired by twitchcoq from @geohot
+... inspired by [twitchcoq](https://github.com/geohot/twitchcoq) from [@geohot](https://github.com/geohot)
 
 ## Usage
 

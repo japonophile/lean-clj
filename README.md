@@ -2,9 +2,24 @@
 
 A metamath parser written in Clojure
 
+... inspired by twitchcoq from @geohot
+
 ## Usage
 
-FIXME
+    lein run <filename>
+
+E.g.
+
+    lein run mm/miu2.mm
+    lein run mm/simple.mm
+    lein run mm/simple2.mm
+    lein run mm/nothing2zero.mm
+    lein run mm/twoplustwo.mm
+    lein run mm/lib/peano.mm
+
+## Run tests
+
+    lein test
 
 ## License
 

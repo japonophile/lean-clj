@@ -59,7 +59,7 @@ variable ::= MATH-SYMBOL
 
 LABEL ::= #'[A-Za-z0-9\.\-_]+' WS
 
-COMPRESSED-PROOF-BLOCK ::= (<#'[A-Z]'> | '?')+
+COMPRESSED-PROOF-BLOCK ::= #'[A-Z?]+' WS
 
 (* Comments. $( ... $) and do not nest. *)
 <_COMMENT> ::= '$(' WS MATH-SYMBOL* '$)' WS

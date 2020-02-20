@@ -224,11 +224,48 @@
                  (throw (ParseException. (str "Label " % " not defined"))))
               labels)))
 
+(defn- decode-proof-chars
+  ([characters]
+   (decode-proof-chars characters [] 0))
+  ([[c & characters] nums acc]
+   (cond
+     (nil? c) nums
+     (= \? c) (decode-proof-chars characters (conj nums "?") 0)
+     (= \Z c) (decode-proof-chars characters (conj nums -1) 0)
+     (< (byte \T) (byte c)) (decode-proof-chars characters nums (+ (* 5 acc) (* 20 (- (byte c) 84))))
+     :else (decode-proof-chars characters (conj nums (+ acc (- (byte c) 64))) 0))))
+
+(defn- num-to-label
+  [x mhyps labels]
+  (let [m (count mhyps)
+        n (count labels)]
+    (cond
+      (= -1 x) :save
+      (>= m x) (get mhyps (dec x))
+      (>= (+ m n) x) (get labels (- x m 1))
+      :else [:load (- x m n 1)])))
+
+(defn- decompress-proof
+  "Decompress a compressed proof"
+  [characters mhyps labels]
+  (let [nums (decode-proof-chars characters)]
+    (vec (map #(num-to-label % mhyps labels) nums))))
+
+(def mandatory-hypotheses)
+
+(defn- check-compressed-proof
+  "Check a compressed proof"
+  [compressed-proof assertion state]
+  (let [labels (vec (map second (filter #(= :LABEL (first %)) compressed-proof)))
+        characters (apply str (map second (filter #(= :COMPRESSED-PROOF-BLOCK (first %)) compressed-proof)))]
+    (decompress-proof characters (mandatory-hypotheses assertion state) labels)))
+
 (defn- check-proof
   "Check the proof part of a provable statement in the program parse tree"
   [label [_ [proof-format & proof]] state]
   (case proof-format
-    :compressed-proof (throw (ParseException. "Compressed proof not supported (yet)"))
+    :compressed-proof   (let [labels (check-compressed-proof proof (get (:provables state) label) state)]
+                          (assoc-in state [:provables label :proof] labels))
     :uncompressed-proof (let [labels (vec (map second proof))
                               _ (check-labels labels state)]
                           (assoc-in state [:provables label :proof] labels))))
@@ -279,7 +316,7 @@
 (defn mandatory-hypotheses
   "Return the list of mandatory hypothese of an assertion in order of appearance"
   [assertion state]
-  (sort-by
+  (vec (sort-by
     #(.indexOf (:labels state) %)
     (into []
           (concat 
@@ -290,7 +327,7 @@
                                       label))
                                   (-> assertion :scope :floatings))))
                    mvars))
-            (keys (-> assertion :scope :essentials))))))
+            (keys (-> assertion :scope :essentials)))))))
 
 (defn mandatory-disjoints
   "Return the set of disjoint statements of an assertion"
@@ -350,10 +387,10 @@
 (defn verify-proof
   "Verify proof of a provable statement"
   ([[_ {typecode :type symbols :symbols proof :proof scope :scope}] state]
-   (print (str "  \"" (pprint-syms symbols) "\"... "))
-   (verify-proof typecode symbols proof scope state [])
+   (print (str "  \"" typecode " " (pprint-syms symbols) "\"... "))
+   (verify-proof typecode symbols proof scope state [] [])
    (println "OK!"))
-  ([typecode symbols [l & remaining-labels] scope state stack]
+  ([typecode symbols [l & remaining-labels] scope state stack saved-steps]
    (if (nil? l)
      (let [{t :type ss :symbols} (peek stack)]
        (if-not (and (= typecode t) (= symbols ss) (empty? (pop stack)))
@@ -361,14 +398,22 @@
                                       " while expecting " [typecode (pprint-syms symbols)] ")")))))
      (if-let [floating (get (:floatings scope) l)]
        (verify-proof typecode symbols remaining-labels scope state
-                     (conj stack {:type (:type floating) :symbols [(:variable floating)]}))
+                     (conj stack {:type (:type floating) :symbols [(:variable floating)]})
+                     saved-steps)
        (if-let [essential (get (:essentials scope) l)]
-         (verify-proof typecode symbols remaining-labels scope state (conj stack essential))
-         (if-let [axiom (get (:axioms state) l)]
+         (verify-proof typecode symbols remaining-labels scope state (conj stack essential) saved-steps)
+         (if-let [axiom (or (get (:axioms state) l)
+                            (get (:provables state) l))]
            (apply-axiom axiom state stack
                         (fn [stack]
-                          (verify-proof typecode symbols remaining-labels scope state stack)))
-           (throw (ParseException. (str "Proof verification failed (unrecognized label " l ")")))))))))
+                          (verify-proof typecode symbols remaining-labels scope state stack saved-steps)))
+           (if (= :save l)
+             (verify-proof typecode symbols remaining-labels scope state stack (conj saved-steps (peek stack)))
+             (if (and (seq l) (= :load (first l)))
+               (verify-proof typecode symbols remaining-labels scope state
+                             (conj stack (get saved-steps (second l))) saved-steps)
+               (throw (ParseException. (str "Proof verification failed (unrecognized label " l ")")))))))))))
+
 
 (defn verify-proofs
   "Verify proofs of a parsed metamath program"

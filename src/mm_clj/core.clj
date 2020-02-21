@@ -1,7 +1,7 @@
 (ns mm-clj.core
   (:require
     [clojure.java.io :as io]
-    [clojure.math.combinatorics :refer [combinations]]
+    [clojure.math.combinatorics :refer [combinations cartesian-product]]
     [clojure.string :refer [index-of includes? join]]
     [instaparse.core :as insta])
   (:import
@@ -258,7 +258,7 @@
   [compressed-proof assertion state]
   (let [labels (vec (map second (filter #(= :LABEL (first %)) compressed-proof)))
         characters (apply str (map second (filter #(= :COMPRESSED-PROOF-BLOCK (first %)) compressed-proof)))]
-    (decompress-proof characters (mandatory-hypotheses assertion state) labels)))
+    (decompress-proof characters (mandatory-hypotheses assertion (:labels state)) labels)))
 
 (defn- check-proof
   "Check the proof part of a provable statement in the program parse tree"
@@ -315,9 +315,9 @@
 
 (defn mandatory-hypotheses
   "Return the list of mandatory hypothese of an assertion in order of appearance"
-  [assertion state]
+  [assertion labels]
   (vec (sort-by
-    #(.indexOf (:labels state) %)
+    #(.indexOf labels %)
     (into []
           (concat 
             (let [mvars (mandatory-variables assertion)]
@@ -339,41 +339,70 @@
                          (some #{y} mvars)))
                   (-> assertion :scope :disjoints)))))
 
-(defn apply-substitutions
+(defn- apply-substitutions
   "Apply substitutions to a list of symbols"
   [subst symbols constants]
   (vec (apply concat (map #(if (some #{%} constants) [%] (get subst %)) symbols))))
 
-(defn find-substitutions
+(defn- find-substitutions
   "Perform unification"
-  [[s & stack] [h & hypos] scope state subst]
+  [[s & stack] [h & hypos] scope constants subst]
   (if (nil? s)
     subst
     (if-let [f (get (:floatings scope) h)]
       (if (= (:type f) (:type s))
         (if-let [subvar (get subst (:variable f))]
           (if (= subvar (:symbols s))
-            (find-substitutions stack hypos scope state subst)
+            (find-substitutions stack hypos scope constants subst)
             (throw (ParseException. (str "Proof verification failed (incompatible substitutions for variable " (:variable f) ")"))))
-          (find-substitutions stack hypos scope state (assoc subst (:variable f) (:symbols s))))
+          (find-substitutions stack hypos scope constants (assoc subst (:variable f) (:symbols s))))
         (throw (ParseException. (str "Proof verification failed (type mismatch for variable " (:variable f) ")"))))
       (if-let [e (get (:essentials scope) h)]
         ; since all variables in an essential hypothesis need to have associated floating hypothesis
         ; all substitutions should be identified when we unify essential hypotheses, so we just
         ; apply substitutions in the essential hypothesis and check it matches what's on the stack
         (if (= (:type e) (:type s))
-          (if (= (apply-substitutions subst (:symbols e) (:constants state)) (:symbols s))
-            (find-substitutions stack hypos scope state subst)
+          (if (= (apply-substitutions subst (:symbols e) constants) (:symbols s))
+            (find-substitutions stack hypos scope constants subst)
             (throw (ParseException. (str "Proof verification failed (mismatch in essential hypothesis " h ")"))))
           (throw (ParseException. (str "Proof verification failed (type mismatch for essential hypothesis " h ")"))))))))
 
-(defn apply-axiom
+(defn- check-expressions-disjoint
+  "Check that two expressions are disjoint"
+  [exprx expry provable-vars provable-disjs]
+  (let [varsx (keep #(get provable-vars %) exprx)
+        varsy (keep #(get provable-vars %) expry)
+        allpairs (cartesian-product varsx varsy)]
+    (doall (map (fn [[x y]]
+                  (when (not-any? #{(sort [x y])} provable-disjs)
+                    (throw (ParseException. "Proof verification failed (disjoint restriction violated)"))))
+                allpairs))))
+
+(defn- check-disjoint-restriction
+  "Check a disjoint restriction for a pair of variable"
+  [[x y] assertion-disjoints provable-scope subst]
+  (when (and (some #{(sort [x y])} assertion-disjoints)
+           (contains? subst x) (contains? subst y))
+    (let [substx (get subst x)
+          substy (get subst y)]
+      (check-expressions-disjoint substx substy (:variables provable-scope) (:disjoints provable-scope)))))
+
+(defn- check-disjoint-restrictions
+  "Check the validity of disjoint restrictions for a given axiom"
+  [assertion provable-scope subst]
+  (let [mvars (mandatory-variables assertion)]
+    (doall (map #(check-disjoint-restriction
+                   % (mandatory-disjoints assertion) provable-scope subst)
+                (combinations mvars 2)))))
+
+(defn- apply-axiom
   "Apply an axiom"
-  [axiom state stack done-fn]
-  (let [mhypos (mandatory-hypotheses axiom state)
+  [axiom provable-scope state stack done-fn]
+  (let [mhypos (mandatory-hypotheses axiom (:labels state))
         n (count mhypos)]
     (if (<= n (count stack))
-      (let [subst (find-substitutions (vec (take-last n stack)) mhypos (:scope axiom) state {})]
+      (let [subst (find-substitutions (vec (take-last n stack)) mhypos (:scope axiom) (:constants state) {})
+            _ (check-disjoint-restrictions axiom provable-scope subst)]
         (done-fn
           (conj (vec (drop-last n stack))
                 {:type (:type axiom) :symbols (apply-substitutions subst (:symbols axiom) (:constants state))})))
@@ -386,8 +415,8 @@
 
 (defn verify-proof
   "Verify proof of a provable statement"
-  ([[_ {typecode :type symbols :symbols proof :proof scope :scope}] state]
-   (print (str "  \"" typecode " " (pprint-syms symbols) "\"... "))
+  ([[proof-label {typecode :type symbols :symbols proof :proof scope :scope}] state]
+   (print (str "  " proof-label " \"" typecode " " (pprint-syms symbols) "\"... "))
    (verify-proof typecode symbols proof scope state [] [])
    (println "OK!"))
   ([typecode symbols [l & remaining-labels] scope state stack saved-steps]
@@ -404,7 +433,7 @@
          (verify-proof typecode symbols remaining-labels scope state (conj stack essential) saved-steps)
          (if-let [axiom (or (get (:axioms state) l)
                             (get (:provables state) l))]
-           (apply-axiom axiom state stack
+           (apply-axiom axiom scope state stack
                         (fn [stack]
                           (verify-proof typecode symbols remaining-labels scope state stack saved-steps)))
            (if (= :save l)

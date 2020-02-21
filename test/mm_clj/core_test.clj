@@ -172,11 +172,11 @@
       (is (= #{"x" "y" "z"} (mandatory-variables (get (:axioms state) "ax1"))))))
   (testing "The (possibly empty) set of mandatory hypotheses is the set of all active $f statements containing mandatory variables, together with all active $e statements."
     (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\nax1 $a wff = x z $.\n")]
-      (is (= ["varx" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") state))))
+      (is (= ["varx" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") (:labels state)))))
     (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvarx $f var x $.\nvary $f var y $.\nvarz $f var z $.\nmin $e wff = x y $.\nax1 $a wff = x z $.\n")]
-      (is (= ["varx" "vary" "varz" "min"] (mandatory-hypotheses (get (:axioms state) "ax1") state))))
+      (is (= ["varx" "vary" "varz" "min"] (mandatory-hypotheses (get (:axioms state) "ax1") (:labels state)))))
     (let [state (parse-mm-program "$c var wff = $.\n$v n x y z $.\nvary $f var y $.\nvarx $f var x $.\nmin $e wff = x y $.\nvarz $f var z $.\nax1 $a wff = x z $.\n")]
-      (is (= ["vary" "varx" "min" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") state)))))
+      (is (= ["vary" "varx" "min" "varz"] (mandatory-hypotheses (get (:axioms state) "ax1") (:labels state))))))
   (testing "The set of mandatory $d statements associated with an assertion are those active $d statements whose variables are both among the assertion’s mandatory variables."
     (let [state (parse-mm-program "$c var wff = $.\n$v x y z $.\nvarx $f var x $.\nvarz $f var z $.\n$d x y $.\n$d y z $.\n$d x z $.\nax1 $a wff = x z $.\n")]
       (is (= #{["x" "z"]} (mandatory-disjoints (get (:axioms state) "ax1")))))
@@ -216,4 +216,40 @@ lesstrivial $p |- M I I $=
 $.
 "
           state (parse-mm-program program)]
+      (is (record? (verify-proofs state)))))
+  (testing "If two variables replaced by a substitution exist in a mandatory $d statement of the assertion referenced, the two expressions resulting from the substitution must satisfy the following conditions. [...]"
+    (let [program "
+$c |- var ne $.
+${
+  $v x y $.
+  varx $f var x $. vary $f var y $.
+  $d x y $.
+  ax $a |- x ne y $.
+$}
+${
+  $v a b $.
+  vara $f var a $. varb $f var b $.
+  axx $p |- a ne b $= vara varb ax $.
+$}
+"
+          state (parse-mm-program program)]
+      (is (thrown-with-msg? ParseException #"Proof verification failed \(disjoint restriction violated\)"
+                            (verify-proofs state))))
+    (let [program "
+$c |- var ne $.
+${
+  $v x y $.
+  varx $f var x $. vary $f var y $.
+  $d x y $.
+  ax $a |- x ne y $.
+$}
+${
+  $v a b $.
+  $d a b $.
+  vara $f var a $. varb $f var b $.
+  axx $p |- a ne b $= vara varb ax $.
+$}
+"
+          state (parse-mm-program program)]
       (is (record? (verify-proofs state))))))
+

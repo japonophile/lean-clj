@@ -46,7 +46,7 @@ provable-stmt ::= LABEL <'$p'> WS typecode MATH-SYMBOL*
    If '?' is in a proof it's an "incomplete" proof. *)
 proof ::= uncompressed-proof | compressed-proof
 uncompressed-proof ::= ( LABEL | '?' WS )+
-compressed-proof ::= <'('> WS LABEL* <')'> WS COMPRESSED-PROOF-BLOCK+
+compressed-proof ::= <'('> WS COMPRESSED-PROOF-LABELS <')'> WS COMPRESSED-PROOF-BLOCKS
 
 typecode ::= constant
 
@@ -57,14 +57,17 @@ variable ::= MATH-SYMBOL
 (* ASCII printable characters, except '$' and whitespaces *)
 <MATH-SYMBOL> ::= #'[\x21-\x23\x25-\x7e]+' WS
 
-LABEL ::= #'[A-Za-z0-9\.\-_]+' WS
+<LABEL> ::= #'[A-Za-z0-9\.\-_]+' WS
 
-COMPRESSED-PROOF-BLOCK ::= #'[A-Z?]+' WS
-
-(* Comments. $( ... $) and do not nest. *)
-<_COMMENT> ::= '$(' WS MATH-SYMBOL* '$)' WS
+COMPRESSED-PROOF-LABELS ::= LABEL*
+COMPRESSED-PROOF-BLOCKS ::= ( #'[A-Z?]+' WS )+
 
 (* Whitespace *)
-<_WHITECHAR> ::= (<' '> | <'\t'> | <'\r'> | <'\n'> | <'\f'>)
-<WS> ::= _WHITECHAR+
+<_WHITECHARS> ::= <#'\s+'>
+
+(* Comments. $( ... $) and do not nest. *)
+<COMMENT-SYMBOL> ::= <!'$)' #'[\x21-\x7e]+'> _WHITECHARS
+<_COMMENT> ::= <'$('> _WHITECHARS COMMENT-SYMBOL* <'$)'> _WHITECHARS
+
+<WS> ::= ( _COMMENT | _WHITECHARS )+
 

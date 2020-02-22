@@ -12,25 +12,19 @@
 
 (defn strip-comments
   "Strip comments"
-  [text]
-  (if-let [start (index-of text "$(")]
-    (let [end (index-of text "$)")]
-      (if (and end (> end start))
-        (if (not (includes? (subs text (+ 2 start) end) "$("))
-          (str (subs text 0 start) (strip-comments (subs text (+ 2 end))))
-          (throw (ParseException. "Comments may not be nested")))
-        (throw (ParseException. "Malformed comment"))))
-    text))
+  ([text]
+   (strip-comments text ""))
+  ([text stripped]
+   (if-let [start (index-of text "$(")]
+     (let [end (index-of text "$)")]
+       (if (and end (> end start))
+         (if (not (includes? (subs text (+ 2 start) end) "$("))
+           (recur (subs text (+ 2 end)) (str stripped (subs text 0 start)))
+           (throw (ParseException. "Comments may not be nested")))
+         (throw (ParseException. "Malformed comment"))))
+     (str stripped text))))
 
 (def mm-parser (insta/parser (io/resource "mm_clj/mm.bnf")))
-
-(defn- check-grammar
-  "Parse metamath program"
-  [program]
-  (let [result (mm-parser program)]
-    (if (instance? Failure result)
-      (throw (ParseException. (str "Parse error: " (:reason result) ", at position " (:index result))))
-      program)))
 
 (def read-file)
 
@@ -59,7 +53,7 @@
   ([filename]
    (first (read-file filename [filename])))
   ([filename included-files]
-   (let [program (check-grammar (strip-comments (slurp filename)))
+   (let [program (strip-comments (slurp filename))
          rootdir (.getParent (io/file filename))]
      (load-includes program included-files rootdir))))
 
@@ -142,7 +136,7 @@
 
 (defn- check-floating-stmt
   "Check a floating hypothesis statement in the program parse tree"
-  [[[_ label] [_ [_ typecode]] [_ variable]] state]
+  [[label [_ [_ typecode]] [_ variable]] state]
   (let [state (add-label label state)
         state (set-active-variable-type variable typecode state)]
     (assoc-in state [:scope :floatings label] {:variable variable :type typecode})))
@@ -169,7 +163,7 @@
 
 (defn- check-essential-stmt
   "Check an essential hypothesis statement in the program parse tree"
-  [[[_ label] [_ [_ typecode]] & symbols] state]
+  [[label [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
         _ (check-symbols symbols state)
         _ (check-variables-have-type symbols state)]
@@ -204,7 +198,7 @@
 
 (defn- check-assertion-stmt
   "Check an assertion (axiom or provable) statement in the program parse tree"
-  [assertion-type [[_ label] [_ [_ typecode]] & symbols] state]
+  [assertion-type [label [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
         _ (check-symbols symbols state)
         _ (check-variables-have-type symbols state)]
@@ -256,8 +250,8 @@
 (defn- check-compressed-proof
   "Check a compressed proof"
   [compressed-proof assertion state]
-  (let [labels (vec (map second (filter #(= :LABEL (first %)) compressed-proof)))
-        characters (apply str (map second (filter #(= :COMPRESSED-PROOF-BLOCK (first %)) compressed-proof)))]
+  (let [labels (vec (rest (first compressed-proof)))
+        characters (apply str (rest (second compressed-proof)))]
     (decompress-proof characters (mandatory-hypotheses assertion (:labels state)) labels)))
 
 (defn- check-proof
@@ -266,7 +260,7 @@
   (case proof-format
     :compressed-proof   (let [labels (check-compressed-proof proof (get (:provables state) label) state)]
                           (assoc-in state [:provables label :proof] labels))
-    :uncompressed-proof (let [labels (vec (map second proof))
+    :uncompressed-proof (let [labels (vec proof)
                               _ (check-labels labels state)]
                           (assoc-in state [:provables label :proof] labels))))
 
@@ -274,7 +268,7 @@
   "Check an axiom statement in the program parse tree"
   [tree state]
   (let [state (check-assertion-stmt :provables (butlast tree) state)
-        [[_ label] & _] tree]
+        [label & _] tree]
     (check-proof label (last tree) state)))
 
 (defn- check-program
@@ -455,6 +449,7 @@
   "Parse a metamath file"
   [filename]
   (let [_ (print "Parsing program... ")
+        _ (flush)
         program (parse-mm-program (read-file filename))
         _ (println "OK!")
         result (if (seq (:provables program))

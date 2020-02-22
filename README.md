@@ -16,6 +16,7 @@ E.g.
     lein run mm/nothing2zero.mm
     lein run mm/twoplustwo.mm
     lein run mm/lib/peano.mm
+    lein run mm/lib/set2.mm
 
 ## Run tests
 

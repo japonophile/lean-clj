@@ -594,30 +594,29 @@
 (defn parse-mm
   "Parse a metamath file"
   [filename]
-  (let [_ (print "Reading program from file... ")
-        _ (flush)
-        prg (read-file filename)
-        _ (println "OK!")
-        _ (print "Parsing program... ")
-        _ (flush)
-        program (parse-mm-program prg)
-        _ (println "OK!")
-        result (if (seq (:provables program))
-                 (do
-                   (println "Verifying proofs:")
-                   (verify-proofs program)
-                   (println "Done."))
-                 program)]
-    result))
+  (let [[program pstats]
+        (profiled {}
+                  (let [_ (print "Reading program from file... ")
+                        _ (flush)
+                        prg (read-file filename)
+                        _ (println "OK!")
+                        _ (print "Parsing program... ")
+                        _ (flush)
+                        program (parse-mm-program prg)
+                        _ (println "OK!")]
+                    program))]
+    (println (format-pstats pstats))
+    (if (seq (:provables program))
+      (let [[_ pstats]
+            (profiled {}
+                      (println "Verifying proofs:")
+                      (verify-proofs program)
+                      (println "Done."))]
+        (println (format-pstats pstats))))))
 
 (defn -main
   "A Metamath parser written in Clojure. Fun everywhere!"
   [filename]
-  ;; Send `profile` stats to `println`:
-  (tufte/add-basic-println-handler! {})
-  (let [[_ pstats] (profiled
-                     {}
-                     (try
-                       (parse-mm filename)
-                       (catch Exception e (println (.getMessage e)))))]
-    (println (format-pstats pstats))))
+  (try
+    (parse-mm filename)
+    (catch Exception e (println (.getMessage e)))))

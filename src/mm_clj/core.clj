@@ -214,15 +214,26 @@
         _ (doall (map #(check-variable-active % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
+(def mandatory-variables)
+(def mandatory-disjoints)
+(def mandatory-hypotheses)
+
 (defnp check-assertion-stmt
   "Check an assertion (axiom or provable) statement in the program parse tree"
   [assertion-type [label [_ [_ typecode]] & symbols] state]
   (let [state (add-label label state)
         _ (check-symbols symbols state)
-        _ (check-variables-have-type symbols state)]
+        _ (check-variables-have-type symbols state)
+        assertion {:type typecode :symbols (vec symbols) :scope (:scope state)}
+        mvars (mandatory-variables assertion)
+        assertion (assoc-in assertion [:scope :mvars] mvars)
+        mdisjs (mandatory-disjoints assertion)
+        assertion (assoc-in assertion [:scope :mdisjs] mdisjs)
+        mhypos (mandatory-hypotheses assertion (:labels state))
+        assertion (assoc-in assertion [:scope :mhypos] mhypos)]
     (if (not-any? #{typecode} (:constants state))
       (throw (ParseException. (str "Type " typecode " not found in constants")))
-      (assoc-in state [assertion-type label] {:type typecode :symbols (vec symbols) :scope (:scope state)}))))
+      (assoc-in state [assertion-type label] assertion))))
 
 (defnp check-axiom-stmt
   "Check an axiom statement in the program parse tree"
@@ -264,14 +275,12 @@
   (let [nums (decode-proof-chars characters)]
     (vec (map #(num-to-label % mhyps labels) nums))))
 
-(def mandatory-hypotheses)
-
 (defnp check-compressed-proof
   "Check a compressed proof"
   [compressed-proof assertion state]
   (let [labels (vec (rest (first compressed-proof)))
         characters (apply str (rest (second compressed-proof)))]
-    (decompress-proof characters (mandatory-hypotheses assertion (:labels state)) labels)))
+    (decompress-proof characters (-> assertion :scope :mhypos) labels)))
 
 (defnp check-proof
   "Check the proof part of a provable statement in the program parse tree"
@@ -452,7 +461,7 @@
     #(.indexOf ^clojure.lang.PersistentVector labels %)
     (into []
           (concat 
-            (let [mvars (mandatory-variables assertion)]
+            (let [mvars (-> assertion :scope :mvars)]
               (map (fn [v]
                      (first (keep (fn [[label floating]]
                                     (when (= v (:variable floating))
@@ -464,7 +473,7 @@
 (defnp mandatory-disjoints
   "Return the set of disjoint statements of an assertion"
   [assertion]
-  (let [mvars (mandatory-variables assertion)]
+  (let [mvars (-> assertion :scope :mvars)]
     (into #{}
           (filter (fn [[x y]]
                     (and (some #{x} mvars)
@@ -522,15 +531,15 @@
 (defnp check-disjoint-restrictions
   "Check the validity of disjoint restrictions for a given axiom"
   [assertion provable-scope subst]
-  (let [mvars (mandatory-variables assertion)]
+  (let [mvars (-> assertion :scope :mvars)]
     (doall (map #(check-disjoint-restriction
-                   % (mandatory-disjoints assertion) provable-scope subst)
+                   % (-> assertion :scope :mdisjs) provable-scope subst)
                 (combinations mvars 2)))))
 
 (defnp apply-axiom
   "Apply an axiom"
   [axiom provable-scope state stack]
-  (let [mhypos (mandatory-hypotheses axiom (:labels state))
+  (let [mhypos (-> axiom :scope :mhypos)
         n (count mhypos)]
     (if (<= n (count stack))
       (let [subst (p ::find-substitutions (find-substitutions (vec (take-last n stack)) mhypos (:scope axiom) (:constants state) {}))
@@ -548,12 +557,12 @@
   "Verify proof of a provable statement"
   ([[proof-label {typecode :type symbols :symbols proof :proof scope :scope}] state]
    (print (str "  " proof-label " \"" typecode " " (pprint-syms symbols) "\"... "))
-   (verify-proof typecode symbols proof scope state [] [])
+   (verify-proof typecode symbols proof scope state)
    (println "OK!"))
-  ([typecode symbols labels scope state stack saved-steps]
+  ([typecode symbols labels scope state]
    (loop [[l & remaining-labels] labels
-          stack stack
-          saved-steps saved-steps]
+          stack []
+          saved-steps []]
      (if (nil? l)
        (let [{t :type ss :symbols} (peek stack)]
          (if-not (and (= typecode t) (= symbols ss) (empty? (pop stack)))

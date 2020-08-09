@@ -4,8 +4,7 @@
     [clojure.math.combinatorics :refer [combinations cartesian-product]]
     [clojure.string :as s :refer [index-of includes? join]]
     [instaparse.core :as insta]
-    ; [clojure.edn :as edn]
-    [taoensso.tufte :as tufte :refer [defnp p profiled profile format-pstats]])
+    [taoensso.tufte :as tufte :refer [defnp p profiled format-pstats]])
   (:import
     instaparse.gll.Failure
     mm-clj.ParseException))
@@ -31,7 +30,6 @@
              (throw (ParseException. "Malformed comment"))))
          (do
            (.append b (subs text from))
-           ; (spit "stripped.txt" (str b))
            (str b)))))))
 
 (def mm-parser (insta/parser (io/resource "mm_clj/mm.bnf")))
@@ -214,9 +212,41 @@
         _ (doall (map #(check-variable-active % state) vs))]
     (reduce #(add-disjoint %2 %1) state (combinations vs 2))))
 
-(def mandatory-variables)
-(def mandatory-disjoints)
-(def mandatory-hypotheses)
+(defnp mandatory-variables
+  "Return the set of mandatory variables of an assertion"
+  [assertion]
+  (into #{}
+        (apply concat
+               (conj (map (fn [e]
+                            (filter #(some #{%} (-> assertion :scope :variables)) (:symbols e)))
+                          (vals (-> assertion :scope :essentials)))
+                     (filter #(some #{%} (-> assertion :scope :variables)) (:symbols assertion))))))
+
+(defnp mandatory-hypotheses
+  "Return the list of mandatory hypothese of an assertion in order of appearance"
+  [assertion labels]
+  (vec (sort-by
+    #(.indexOf ^clojure.lang.PersistentVector labels %)
+    (into []
+          (concat 
+            (let [mvars (-> assertion :scope :mvars)]
+              (map (fn [v]
+                     (first (keep (fn [[label floating]]
+                                    (when (= v (:variable floating))
+                                      label))
+                                  (-> assertion :scope :floatings))))
+                   mvars))
+            (keys (-> assertion :scope :essentials)))))))
+
+(defnp mandatory-disjoints
+  "Return the set of disjoint statements of an assertion"
+  [assertion]
+  (let [mvars (-> assertion :scope :mvars)]
+    (into #{}
+          (filter (fn [[x y]]
+                    (and (some #{x} mvars)
+                         (some #{y} mvars)))
+                  (-> assertion :scope :disjoints)))))
 
 (defnp check-assertion-stmt
   "Check an assertion (axiom or provable) statement in the program parse tree"
@@ -277,7 +307,7 @@
 
 (defnp check-compressed-proof
   "Check a compressed proof"
-  [compressed-proof assertion state]
+  [compressed-proof assertion]
   (let [labels (vec (rest (first compressed-proof)))
         characters (apply str (rest (second compressed-proof)))]
     (decompress-proof characters (-> assertion :scope :mhypos) labels)))
@@ -286,7 +316,7 @@
   "Check the proof part of a provable statement in the program parse tree"
   [label [_ [proof-format & proof]] state]
   (case proof-format
-    :compressed-proof   (let [labels (check-compressed-proof proof (get (:provables state) label) state)]
+    :compressed-proof   (let [labels (check-compressed-proof proof (get (:provables state) label))]
                           (assoc-in state [:provables label :proof] labels))
     :uncompressed-proof (let [labels (vec proof)
                               _ (check-labels labels state)]
@@ -312,9 +342,7 @@
     :provable-stmt  (check-provable-stmt children state)
     :block          (check-block-stmt children state)
     (if (vector? (first children))
-      (do
-        ; (println (count children))
-        (reduce #(check-program %2 %1) state children))
+      (reduce #(check-program %2 %1) state children)
       state)))
 
 ; (defn parse-mm-program
@@ -369,116 +397,14 @@
           (throw (ParseException. (str (:reason top-tree))))
           (into tree (vec (rest top-tree))))))))
 
-; (defn class-name->ns-str
-;   "Turns a class string into a namespace string (by translating _ to -)"
-;   [class-name]
-;   (s/replace class-name #"_" "-"))
-
-; ; Welll... let's introspect the tag at runtime and see if we have a corresponding defrecord
-; (defn edn-tag->constructor
-;   "Takes an edn tag and returns a constructor fn taking that tag's value and
-;   building an object from it."
-;   [tag]
-;   (let [c (resolve tag)]
-;     (when (nil? c)
-;       (throw (RuntimeException. (str "EDN tag " (pr-str tag) " isn't resolvable to a class")
-;                                 (pr-str tag))))
-
-;     (when-not ((supers c) clojure.lang.IRecord)
-;       (throw (RuntimeException.
-;              (str "EDN tag " (pr-str tag)
-;                   " looks like a class, but it's not a record,"
-;                   " so we don't know how to deserialize it."))))
-
-;     (let [; Translate from class name "foo.Bar" to namespaced constructor fn
-;           ; "foo/map->Bar"
-;           constructor-name (-> (name tag)
-;                                class-name->ns-str
-;                                (s/replace #"\.([^\.]+$)" "/map->$1"))
-;           constructor (resolve (symbol constructor-name))]
-;       (when (nil? constructor)
-;         (throw (RuntimeException.
-;                (str "EDN tag " (pr-str tag) " looks like a record, but we don't"
-;                     " have a map constructor " constructor-name " for it"))))
-;       constructor)))
-
-; ; This is expensive, so we'll avoid doing it more than once
-; (def memoized-edn-tag->constructor (memoize edn-tag->constructor))
-
-; ; Now we can provide a default reader for unknown tags...
-; (defn default-edn-reader
-;   "We use defrecords heavily and it's nice to be able to deserialize them."
-;   [tag value]
-;   (if-let [c (memoized-edn-tag->constructor tag)]
-;     (c value)
-;     (throw (RuntimeException.
-;              (str "Don't know how to read edn tag " (pr-str tag))))))
-
 (defnp parse-mm-program
   "Parse a metamath program"
   [program]
-  (let [tree
-        (parse-mm-program-by-blocks program)
-        ; (time (parse-mm-program-by-blocks program))
-        ; (if (.exists (clojure.java.io/as-file "parsed-program.edn"))
-        ;   (do
-        ;     (println "SKIP (Read parsed program from file)")
-        ;     (read-string (slurp "parsed-program.edn")))
-        ;   (let [tree (time (parse-mm-program-by-blocks program))]
-        ;     (spit "parsed-program.edn" tree)
-        ;     tree))
-        state
-        (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{})))
-        ; (time (check-program tree (ParserState. #{} {} [] {} {}
-        ;                                         (Scope. #{} {} {} #{}))))
-        ; (if (.exists (clojure.java.io/as-file "checked-program.edn"))
-        ;   (do
-        ;     (println "SKIP (Read checked program from file)")
-        ;     (edn/read-string {:default default-edn-reader} (slurp "checked-program.edn")))
-        ;   (let [state (time (check-program tree (ParserState. #{} {} [] {} {}
-        ;                                                       (Scope. #{} {} {} #{}))))]
-        ;     (spit "checked-program.edn" (pr-str state))
-        ;     state))
-       ]
+  (let [tree (parse-mm-program-by-blocks program)
+        state (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{})))]
     state))
 
 ;;; Proof verification stuff
-
-(defnp mandatory-variables
-  "Return the set of mandatory variables of an assertion"
-  [assertion]
-  (into #{}
-        (apply concat
-               (conj (map (fn [e]
-                            (filter #(some #{%} (-> assertion :scope :variables)) (:symbols e)))
-                          (vals (-> assertion :scope :essentials)))
-                     (filter #(some #{%} (-> assertion :scope :variables)) (:symbols assertion))))))
-
-(defnp mandatory-hypotheses
-  "Return the list of mandatory hypothese of an assertion in order of appearance"
-  [assertion labels]
-  (vec (sort-by
-    #(.indexOf ^clojure.lang.PersistentVector labels %)
-    (into []
-          (concat 
-            (let [mvars (-> assertion :scope :mvars)]
-              (map (fn [v]
-                     (first (keep (fn [[label floating]]
-                                    (when (= v (:variable floating))
-                                      label))
-                                  (-> assertion :scope :floatings))))
-                   mvars))
-            (keys (-> assertion :scope :essentials)))))))
-
-(defnp mandatory-disjoints
-  "Return the set of disjoint statements of an assertion"
-  [assertion]
-  (let [mvars (-> assertion :scope :mvars)]
-    (into #{}
-          (filter (fn [[x y]]
-                    (and (some #{x} mvars)
-                         (some #{y} mvars)))
-                  (-> assertion :scope :disjoints)))))
 
 (defnp apply-substitutions
   "Apply substitutions to a list of symbols"

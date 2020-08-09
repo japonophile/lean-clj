@@ -68,7 +68,7 @@
     (is (get (-> (parse-mm-program "$v x y $.\n") :scope :variables) "x")))
   (testing "A constant must be declared in the outermost block"
     (is (record? (parse-mm-program "$c a b c $.\n${\n  $v x y $.\n$}\n$c d e f $.\n")))
-    (is (thrown-with-msg? ParseException #".*:expecting \"\$}\".*"
+    (is (thrown-with-msg? ParseException #".*:expecting \"\$\{\".*"
                           (parse-mm-program "$c a b c $.\n${\n  $c d e f $.\n$}\n"))))
   (testing "A constant ... may not be declared a second time.")
     (is (thrown-with-msg? ParseException #"Constant b was already defined before"

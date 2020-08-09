@@ -1,0 +1,13 @@
+
+database ::= WS* outermost-scope-stmt*
+
+<outermost-scope-stmt> ::=
+  include-stmt | constant-stmt | stmt
+
+(* File inclusion command; process file as a database.
+   Databases should NOT have a comment in the filename. *)
+include-stmt ::= <'$['> WS filename <'$]'> WS
+
+(* Constant symbols declaration. *)
+constant-stmt ::= <'$c'> WS constant+ <'$.'> WS
+

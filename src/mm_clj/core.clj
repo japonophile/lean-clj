@@ -46,7 +46,7 @@
 (defnp load-include-once
   "Load included file if it has not been included before"
   [text include-stmt filename included-files]
-  (if (some #{filename} included-files)
+  (if (contains? included-files filename)
     [(s/replace text include-stmt "") included-files]
     (let [[text-to-include updated-included-files]
           (read-file filename (conj included-files filename))]
@@ -78,23 +78,23 @@
 (defnp add-constant
   "Add constant to the parser state"
   [c state]
-  (if (some #{c} (:constants state))
+  (if (contains? (:constants state) c)
     (throw (ParseException. (str "Constant " c " was already defined before")))
     (if (contains? (:vartypes state) c)
       (throw (ParseException. (str "Constant " c " was previously defined as a variable before")))
-      (if (some #{c} (:labels state))
+      (if (contains? (:labels state) c)
         (throw (ParseException. (str "Constant " c " matches an existing label")))
         (assoc state :constants (conj (:constants state) c))))))
 
 (defnp add-variable
   "Add variable to the parser state"
   [v state]
-  (if (some #{v} (:constants state))
+  (if (contains? (:constants state) v)
     (throw (ParseException. (str "Variable " v " matches an existing constant")))
-    (if (some #{v} (:labels state))
+    (if (contains? (:labels state) v)
       (throw (ParseException. (str "Variable " v " matches an existing label")))
       (let [active-vars (-> state :scope :variables)]
-        (if (some #{v} active-vars)
+        (if (contains? active-vars v)
           (throw (ParseException. (str "Variable " v " was already defined before")))
           (let [state (assoc-in state [:scope :variables] (conj active-vars v))]
             (if (not (contains? (:vartypes state) v))
@@ -104,18 +104,18 @@
 (defnp add-label
   "Add label to the parser state"
   [l state]
-  (if (some #{l} (:labels state))
+  (if (contains? (:labels state) l)
     (throw (ParseException. (str "Label " l " was already defined before")))
-    (if (some #{l} (:constants state))
+    (if (contains? (:constants state) l)
       (throw (ParseException. (str "Label " l " matches a constant")))
       (if (contains? (:vartypes state) l)
         (throw (ParseException. (str "Label " l " matches a variable")))
-        (assoc state :labels (conj (:labels state) l))))))
+        (update state :labels #(conj % {l (inc (count %))}))))))
 
 (defnp check-variable-active
   "Check that a variable is (defined and) active"
   [v state]
-  (when (not-any? #{v} (-> state :scope :variables))
+  (when (not (contains? (-> state :scope :variables) v))
     (throw (ParseException. (str "Variable " v " not active")))))
 
 (defnp get-active-variable-type
@@ -161,8 +161,8 @@
   [symbols state]
   (doall
     (map (fn [s]
-           (when (and (not-any? #{s} (:constants state))
-                      (not-any? #{s} (-> state :scope :variables)))
+           (when (and (not (contains? (:constants state) s))
+                      (not (contains? (-> state :scope :variables) s)))
              (throw (ParseException. (str "Variable or constant " s " not defined")))))
          symbols)))
 
@@ -171,7 +171,7 @@
   [symbols state]
   (doall
     (map (fn [s]
-           (when (some #{s} (-> state :scope :variables))
+           (when (contains? (-> state :scope :variables) s)
              (when (not-any? #(= s (:variable (second %))) (-> state :scope :floatings))
                (throw (ParseException. (str "Variable " s " must be assigned a type"))))))
          symbols)))
@@ -182,7 +182,7 @@
   (let [state (add-label label state)
         _ (check-symbols symbols state)
         _ (check-variables-have-type symbols state)]
-    (if (not-any? #{typecode} (:constants state))
+    (if (not (contains? (:constants state) typecode))
       (throw (ParseException. (str "Type " typecode " not found in constants")))
       (assoc-in state [:scope :essentials label] {:type typecode :symbols (vec symbols)}))))
 
@@ -199,7 +199,7 @@
   [[x y] state]
   (let [disjoints (-> state :scope :disjoints)
         pair (sort [x y])]
-    (if (some #{pair} disjoints)
+    (if (contains? disjoints pair)
       ; (throw (ParseException. (str "Disjoint variable restriction " pair " already defined")))
       state
       (assoc-in state [:scope :disjoints] (conj disjoints pair)))))
@@ -214,19 +214,19 @@
 
 (defnp mandatory-variables
   "Return the set of mandatory variables of an assertion"
-  [assertion]
+  [assertion scope]
   (into #{}
         (apply concat
                (conj (map (fn [e]
-                            (filter #(some #{%} (-> assertion :scope :variables)) (:symbols e)))
-                          (vals (-> assertion :scope :essentials)))
-                     (filter #(some #{%} (-> assertion :scope :variables)) (:symbols assertion))))))
+                            (filter #(contains? (:variables scope) %) (:symbols e)))
+                          (vals (:essentials scope)))
+                     (filter #(contains? (:variables scope) %) (:symbols assertion))))))
 
 (defnp mandatory-hypotheses
-  "Return the list of mandatory hypothese of an assertion in order of appearance"
-  [assertion labels]
+  "Return the list of mandatory hypotheses of an assertion in order of appearance"
+  [assertion labels scope]
   (vec (sort-by
-    #(.indexOf ^clojure.lang.PersistentVector labels %)
+    labels
     (into []
           (concat 
             (let [mvars (-> assertion :scope :mvars)]
@@ -234,19 +234,19 @@
                      (first (keep (fn [[label floating]]
                                     (when (= v (:variable floating))
                                       label))
-                                  (-> assertion :scope :floatings))))
+                                  (:floatings scope))))
                    mvars))
-            (keys (-> assertion :scope :essentials)))))))
+            (keys (:essentials scope)))))))
 
 (defnp mandatory-disjoints
   "Return the set of disjoint statements of an assertion"
-  [assertion]
+  [assertion scope]
   (let [mvars (-> assertion :scope :mvars)]
     (into #{}
           (filter (fn [[x y]]
-                    (and (some #{x} mvars)
-                         (some #{y} mvars)))
-                  (-> assertion :scope :disjoints)))))
+                    (and (contains? mvars x)
+                         (contains? mvars y)))
+                  (:disjoints scope)))))
 
 (defnp check-assertion-stmt
   "Check an assertion (axiom or provable) statement in the program parse tree"
@@ -254,14 +254,16 @@
   (let [state (add-label label state)
         _ (check-symbols symbols state)
         _ (check-variables-have-type symbols state)
+        ; I'd like to get rid of this                           vvvvvvvvvvvvvv
         assertion {:type typecode :symbols (vec symbols) :scope (:scope state)}
-        mvars (mandatory-variables assertion)
+        ; however, axiom scope is still used in find-substitutions when applying axiom
+        mvars (mandatory-variables assertion (:scope state))
         assertion (assoc-in assertion [:scope :mvars] mvars)
-        mdisjs (mandatory-disjoints assertion)
+        mdisjs (mandatory-disjoints assertion (:scope state))
         assertion (assoc-in assertion [:scope :mdisjs] mdisjs)
-        mhypos (mandatory-hypotheses assertion (:labels state))
+        mhypos (mandatory-hypotheses assertion (:labels state) (:scope state))
         assertion (assoc-in assertion [:scope :mhypos] mhypos)]
-    (if (not-any? #{typecode} (:constants state))
+    (if (not (contains? (:constants state) typecode))
       (throw (ParseException. (str "Type " typecode " not found in constants")))
       (assoc-in state [assertion-type label] assertion))))
 
@@ -273,7 +275,7 @@
 (defnp check-labels
   "Check all labels are defined"
   [labels state]
-  (doall (map #(when (not-any? #{%} (:labels state))
+  (doall (map #(when (not (contains? (:labels state) %))
                  (throw (ParseException. (str "Label " % " not defined"))))
               labels)))
 
@@ -353,7 +355,7 @@
 ;     (println tree)
 ;     (if (instance? Failure tree)
 ;       (throw (ParseException. (str (:reason tree))))
-;       (time (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{})))))))
+;       (time (check-program tree (ParserState. #{} {} {} {} {} (Scope. #{} {} {} #{})))))))
 
 (defnp find-block
   "Find the next block (including any nested block)"
@@ -401,7 +403,7 @@
   "Parse a metamath program"
   [program]
   (let [tree (parse-mm-program-by-blocks program)
-        state (check-program tree (ParserState. #{} {} [] {} {} (Scope. #{} {} {} #{})))]
+        state (check-program tree (ParserState. #{} {} {} {} {} (Scope. #{} {} {} #{})))]
     state))
 
 ;;; Proof verification stuff
@@ -409,7 +411,7 @@
 (defnp apply-substitutions
   "Apply substitutions to a list of symbols"
   [subst symbols constants]
-  (vec (apply concat (map #(if (some #{%} constants) [%] (get subst %)) symbols))))
+  (vec (apply concat (map #(if (contains? constants %) [%] (get subst %)) symbols))))
 
 (defn find-substitutions
   "Perform unification"
@@ -441,14 +443,14 @@
         varsy (keep #(get provable-vars %) expry)
         allpairs (cartesian-product varsx varsy)]
     (doall (map (fn [[x y]]
-                  (when (not-any? #{(sort [x y])} provable-disjs)
+                  (when (not (contains? provable-disjs (sort [x y])))
                     (throw (ParseException. "Proof verification failed (disjoint restriction violated)"))))
                 allpairs))))
 
 (defnp check-disjoint-restriction
   "Check a disjoint restriction for a pair of variable"
   [[x y] assertion-disjoints provable-scope subst]
-  (when (and (some #{(sort [x y])} assertion-disjoints)
+  (when (and (contains? assertion-disjoints (sort [x y]))
            (contains? subst x) (contains? subst y))
     (let [substx (get subst x)
           substy (get subst y)]

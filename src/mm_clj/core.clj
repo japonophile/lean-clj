@@ -2,7 +2,7 @@
   (:require
     [clojure.java.io :as io]
     [clojure.math.combinatorics :refer [combinations cartesian-product]]
-    [clojure.string :as s :refer [index-of includes? join]]
+    [clojure.string :as s :refer [index-of includes? join blank?]]
     [instaparse.core :as insta]
     [taoensso.tufte :as tufte :refer [defnp p profiled format-pstats]])
   (:import
@@ -382,22 +382,25 @@
          tree [:database]]
     (if-let [[blockstart blockend] (find-block program from)]
       ; found block
-      ; parse top segment before the block
-      (let [top-tree (mm-top-parser (subs program from blockstart))]
-        (if (instance? Failure top-tree)
-          (throw (ParseException. (str (:reason top-tree))))
-          ; parse the block
-          (let [block-tree (mm-block-parser (subs program (+ 2 blockstart) blockend))]
-            (if (instance? Failure block-tree)
-              (throw (ParseException. (str (:reason block-tree))))
-              (recur (long (+ 2 blockend))
-                     (conj (into tree (vec (rest top-tree)))
-                           (assoc block-tree 0 :block)))))))
+      (let [; parse top segment before the block (if not blank)
+            before-block (subs program from blockstart)
+            tree (if (not (blank? before-block))
+                   (let [top-tree (mm-top-parser before-block)]
+                     (if (instance? Failure top-tree)
+                       (throw (ParseException. (str (:reason top-tree))))
+                       (into tree (rest top-tree))))
+                   tree)
+            ; parse the block
+            block-tree (mm-block-parser (subs program (+ 2 blockstart) blockend))]
+        (if (instance? Failure block-tree)
+          (throw (ParseException. (str (:reason block-tree))))
+          (recur (long (+ 2 blockend))
+                 (conj tree (assoc block-tree 0 :block)))))
       ; no more block: parse the final top segment
       (let [top-tree (mm-top-parser (subs program from))]
         (if (instance? Failure top-tree)
           (throw (ParseException. (str (:reason top-tree))))
-          (into tree (vec (rest top-tree))))))))
+          (into tree (rest top-tree)))))))
 
 (defnp parse-mm-program
   "Parse a metamath program"

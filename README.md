@@ -24,10 +24,10 @@ E.g.
 
 ## Notes
 
-- Performance was greatly improved compared to the initial implementation:
+- [Performance was greatly improved](PerformanceNotes.md) compared to the initial implementation:
   - we can now parse the whole `set.mm` file (no more `OutOfMemory` exception)
   - all proofs can be verified in a reasonable amount of time
-  - used P Toutanis's `tufte` library for profiling and it helped a lot
+  - used Peter Taoussanis' [`tufte`](https://github.com/ptaoussanis/tufte) library for profiling and it helped a lot
   - we are still nowhere compared to the Rust implementation ( https://github.com/japonophile/minimast )
   - parsing: `4.14 min`, proof verification: `1.67 min`
 

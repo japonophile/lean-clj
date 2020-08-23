@@ -94,22 +94,45 @@
           (throw (Exception. (str i ": empty symbol found")))
           [i (substr program start i)])))))
 
+(defnp add-floating
+  [li typecode variable state]
+  (swap! state
+    (fn [s]
+      (let [p (:program s)
+            ti (get (:symbols p) typecode)
+            vi (get (:symbols p) variable)]
+          (if (or (nil? ti) (nil? vi))
+            (throw (Exception. (str "Typecode " typecode " or variable " variable " not defined")))
+            (if (contains? (-> :scope :vartypes) vi)
+              (throw (Exception. (str "Variable " variable " already has a type")))
+              (if (and (contains? (:vartypes p) vi) (not= ti (get (:vartypes p) vi)))
+                (throw (Exception. (str "Variable " variable " was previously assigned a different type")))
+                (-> s
+                    (update-in [:program :vartypes] assoc vi ti)
+                    (update-in [:scope :vartypes] assoc vi ti)
+                    (update-in [:scope :floatings] assoc li [ti vi])))))))))
+
 (defnp parse-floating-stmt
-  [program start label state]
-  (loop [i start]
+  [program start li state]
+  (let [i (skip-spaces program start state)
+        [i typecode] (parse-symbol program i)
+        i (skip-spaces program i state)
+        [i variable] (parse-symbol program i)
+        i (skip-spaces program i state)]
+    (add-floating li typecode variable state)
     (if (end-stmt? program i)
       (+ i 2)
-      (recur (inc i)))))
+      (throw (Exception. (str i ": unexpected token " (getchr program i)))))))
 
 (defnp parse-essential-stmt
-  [program start label state]
+  [program start li state]
   (loop [i start]
     (if (end-stmt? program i)
       (+ i 2)
       (recur (inc i)))))
 
 (defnp parse-assertion-stmt
-  [assertion-type program start label state]
+  [assertion-type program start li state]
   (loop [i start]
     (if (= (getchr program i) \$)
       (let [c (getchr program (inc i))]
@@ -127,19 +150,31 @@
       (+ i 2)
       (recur (inc i)))))
 
+(defnp add-label
+  [l state]
+  (swap! state
+    (fn [s]
+      (let [p (:program s)]
+        (if (or (contains? (:symbols p) l)
+                (contains? (:labels p) l))
+          (throw (Exception. (str "Label " l " was already defined before")))
+          (let [li (count (:labels p))]
+            (update-in s [:program :labels] assoc l li)))))))
+
 (defnp parse-labeled-stmt
   [program start state]
   (loop [i start]
     (let [[i label] (parse-label program i)
-          i (skip-spaces program i state)]
+          i (skip-spaces program i state)
+          li (add-label label state)]
       (if (= (getchr program i) \$)
         (case (getchr program (inc i))
-          \f (parse-floating-stmt program (+ i 2) label state)
-          \e (parse-essential-stmt program (+ i 2) label state)
-          \a (parse-assertion-stmt :axioms program (+ i 2) label state)
-          \p (parse-assertion-stmt :provables program (+ i 2) label state)
+          \f (parse-floating-stmt program (+ i 2) li state)
+          \e (parse-essential-stmt program (+ i 2) li state)
+          \a (parse-assertion-stmt :axioms program (+ i 2) li state)
+          \p (parse-assertion-stmt :provables program (+ i 2) li state)
           (throw (Exception. (str i ": unexpected token $" (getchr program (inc i))))))
-        (throw (Exception. (str i ": unexpected token " (getchr program  i))))))))
+        (throw (Exception. (str i ": unexpected token " (getchr program i))))))))
 
 (def parse-stmt)
 

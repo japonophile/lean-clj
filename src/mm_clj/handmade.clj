@@ -11,6 +11,9 @@
 
 ;;; Program parsing stuff
 
+(defrecord Program [constants variables symbols labels vartypes axioms provables comments formatting])
+(defrecord Scope [variables vartypes floatings essentials disjoints])
+
 (defn file->bytes [filename]
   (with-open [xin (io/input-stream filename)
               xout (java.io.ByteArrayOutputStream.)]
@@ -29,21 +32,14 @@
   (let [tagged-program (vary-meta program assoc :tag `"[B")]
     `(char (aget ~tagged-program ~i))))
 
+(defmacro next-chars-match?
+  [program i c1 c2]
+  `(and (= (getchr ~program ~i) ~c1)
+        (= (getchr ~program (inc ~i)) ~c2)))
+
 (defmacro end-stmt?
   [program i]
-  `(and (= (getchr ~program ~i) \$)
-        (= (getchr ~program (inc ~i)) \.)))
-
-(defnp skip-whitespaces
-  [program start]
-  (let [n (alength ^bytes program)]
-    (loop [i start]
-      (if (< i n)
-        (let [c (getchr program i)]
-          (if (or (= c \space) (= c \tab) (= c \newline))
-            (recur (inc i))
-            i))
-        i))))
+  `(next-chars-match? ~program ~i \$ \.))
 
 (defnp parse-comment
   [program start state]
@@ -52,16 +48,29 @@
       (case (getchr program (inc i))
         \( (throw (Exception. "Comments may not be nested"))
         \) (let [text (substr program start i)]
-             (swap! state update-in [:comments] inc)
+             (swap! state update-in [:program :comments] inc)
              (swap! state assoc :last-comment text)
              (when (:in-formatting @state)
-               (swap! state assoc :formatting text)
+               (swap! state assoc-in [:program :formatting] text)
                (swap! state dissoc :in-formatting))
              (+ i 2))
         \t (do (swap! state assoc :in-formatting true)
                (recur (inc i)))
         (recur (inc i)))
       (recur (inc i)))))
+
+(defnp skip-spaces
+  [program start state]
+  (let [n (alength ^bytes program)]
+    (loop [i start]
+      (if (< i n)
+        (let [c (getchr program i)]
+          (if (or (= c \space) (= c \tab) (= c \newline))
+            (recur (inc i))
+            (if (and (= c \$) (= (getchr program (inc i)) \())
+              (recur (long (parse-comment program (+ i 2) state)))
+              i)))
+        i))))
 
 (defnp parse-label
   [program start]
@@ -73,6 +82,17 @@
               (= b (byte \-)) (= b (byte \_)) (= b (byte \.)))
         (recur (inc i))
         [i (substr program start i)]))))
+
+(defnp parse-symbol
+  [program start]
+  (loop [i start]
+    (let [b (aget ^bytes program i)]
+      ; ASCII printable characters, except '$' and whitespaces
+      (if (or (<= 0x21 b 0x23) (<= 0x25 b 0x7e))
+        (recur (inc i))
+        (if (= start i)
+          (throw (Exception. (str i ": empty symbol found")))
+          [i (substr program start i)])))))
 
 (defnp parse-floating-stmt
   [program start label state]
@@ -100,13 +120,6 @@
           (recur (inc i))))
       (recur (inc i)))))
 
-(defnp parse-variable-stmt
-  [program start state]
-  (loop [i start]
-    (if (end-stmt? program i)
-      (+ i 2)
-      (recur (inc i)))))
-
 (defnp parse-disjoint-stmt
   [program start state]
   (loop [i start]
@@ -118,69 +131,99 @@
   [program start state]
   (loop [i start]
     (let [[i label] (parse-label program i)
-          i (skip-whitespaces program i)]
+          i (skip-spaces program i state)]
       (if (= (getchr program i) \$)
         (case (getchr program (inc i))
-          \( (recur (long (parse-comment program (+ i 2) state)))
           \f (parse-floating-stmt program (+ i 2) label state)
           \e (parse-essential-stmt program (+ i 2) label state)
           \a (parse-assertion-stmt :axioms program (+ i 2) label state)
           \p (parse-assertion-stmt :provables program (+ i 2) label state)
-          (throw (Exception. (str i ": Unexpected token $" (getchr program (inc i))))))
-        (throw (Exception. (str i ": Unexpected token " (getchr program  i))))))))
+          (throw (Exception. (str i ": unexpected token $" (getchr program (inc i))))))
+        (throw (Exception. (str i ": unexpected token " (getchr program  i))))))))
 
 (def parse-stmt)
 
 (defnp parse-block
   [program start state]
+  (let [saved-scope (:scope @state)]
+    (loop [i start]
+      (let [i (skip-spaces program i state)]
+        (if (next-chars-match? program i \$ \})
+          (do (swap! state assoc :scope saved-scope)
+              (+ i 2))
+          (recur (long (parse-stmt program i state))))))))
+
+(defnp add-constant
+  [c state]
+  (swap! state
+    (fn [s]
+      (let [p (:program s)]
+        (if (or (contains? (:symbols p) c)
+                (contains? (:labels p) c))
+          (throw (Exception. (str "Constant " c " was already defined before")))
+          (let [ci (count (:symbols p))]
+            (-> s
+                (update-in [:program :symbols] assoc c ci)
+                (update-in [:program :constants] conj ci))))))))
+
+(defnp add-variable
+  [v state]
+  (swap! state
+    (fn [s]
+      (let [p (:program s)]
+        (if (contains? (:labels p) v)
+          (throw (Exception. (str "Variable " v " matches an existing label")))
+          (if-let [vi ((:symbols p) v)]
+            (if (contains? (:constants p) vi)
+              (throw (Exception. (str "Variable " v " matches an existing constant")))
+              (if (contains? (-> s :scope :variables) vi)
+                (throw (Exception. (str "Variable " v " was already defined before")))
+                (update-in s [:scope :variables] conj vi)))
+            (let [vi (count (:symbols p))]
+              (-> s
+                  (update-in [:program :symbols] assoc v vi)
+                  (update-in [:program :variables] conj vi)
+                  (update-in [:scope :variables] conj vi)))))))))
+
+(defnp parse-const-var-stmt
+  [program start add-symbol state]
   (loop [i start]
-    (let [i (skip-whitespaces program i)]
-      (if (= (getchr program i) \$)
-        (case (getchr program (inc i))
-          \( (recur (long (parse-comment program (+ i 2) state)))
-          \} (+ i 2)
-          (recur (long (parse-stmt program i state))))
-        (recur (long (parse-stmt program i state)))))))
+    (let [i (skip-spaces program i state)]
+      (if (end-stmt? program i)
+        (+ i 2)
+        (let [[i sym] (parse-symbol program i)]
+          (add-symbol sym state)
+          (recur i))))))
 
 (defnp parse-stmt
   [program start state]
   (loop [i start]
-    (let [i (skip-whitespaces program i)]
+    (let [i (skip-spaces program i state)]
       (if (= (getchr program i) \$)
         (case (getchr program (inc i))
-          \( (recur (long (parse-comment program (+ i 2) state)))
           \{ (parse-block program (+ i 2) state)
-          \v (parse-variable-stmt program (+ i 2) state)
+          \v (parse-const-var-stmt program (+ i 2) add-variable state)
           \d (parse-disjoint-stmt program (+ i 2) state)
-          (throw (Exception. (str i ": Unexpected token $" (getchr program (inc i))))))
+          (throw (Exception. (str i ": unexpected token $" (getchr program (inc i))))))
         (parse-labeled-stmt program i state)))))
-
-(defnp parse-constant-stmt
-  [program start state]
-  (loop [i start]
-    (if (end-stmt? program i)
-      (+ i 2)
-      (recur (inc i)))))
 
 (defnp parse-top-level
   [program state]
   (let [n (alength ^bytes program)]
-    (println n)
     (loop [i 0]
-      (let [i (skip-whitespaces program i)]
+      (let [i (skip-spaces program i state)]
         (if (< i n)
-          (if (= (getchr program i) \$)
-            (case (getchr program (inc i))
-              \( (recur (long (parse-comment program (+ i 2) state)))
-              \c (recur (long (parse-constant-stmt program (+ i 2) state)))
-              (recur (long (parse-stmt program i state))))
+          (if (next-chars-match? program i \$ \c)
+            (recur (long (parse-const-var-stmt program (+ i 2) add-constant state)))
             (recur (long (parse-stmt program i state))))
           @state)))))
 
 (defnp parse-mm-program
   "Parse a metamath program"
   [program]
-  (let [state (atom {:comments 0 :axioms [] :provables []})]
+  (let [state (atom {:program (Program. #{} #{} {} {} {} {} {} 0 "")
+                     :scope (Scope. #{} {} {} {} #{})
+                     :last-comment ""})]
     (parse-top-level program state)))
 
 (defn create-symbol-map
@@ -231,10 +274,14 @@
                         _ (println "OK!")
                         _ (print "Parsing program... ")
                         _ (flush)
-                        program (parse-mm-program bs)
-                        _ (println "OK!")]
+                        state (parse-mm-program bs)
+                        _ (println "OK!")
+                        program (:program state)]
                     program))]
-    (println (str (:comments program) " comments"))
+    ; (println (str (:comments program) " comments"))
+    (println (str (count (:symbols program)) " symbols"))
+    (println (str (count (:constants program)) " constants"))
+    (println (str (count (:variables program)) " variables"))
     (let [formatting (:formatting program)
           symbolmap (create-symbol-map formatting)
           axioms (map #(split (trim %) #"\s+") (:axioms program))

@@ -2,6 +2,7 @@
   (:require
     [clojure.java.io :as io]
     [clojure.string :refer [includes? join split split-lines trim]]
+    [clojure.data.int-map :as i]
     [taoensso.tufte :as tufte :refer [defnp profiled format-pstats]])
   (:import
     java.util.Arrays))
@@ -124,12 +125,48 @@
       (+ i 2)
       (throw (Exception. (str i ": unexpected token " (getchr program i)))))))
 
+(defnp parse-symbols
+  [program start state stop-marker]
+  (loop [i start
+         symbols []]
+    (let [i (skip-spaces program i state)]
+      (if (next-chars-match? program i \$ (char stop-marker))
+        [(+ i 2) symbols]
+        (let [[i sym] (parse-symbol program i)]
+          (recur i (conj symbols sym)))))))
+
+(defnp parse-typed-symbols
+  ([program start state]
+   (parse-typed-symbols program start state \.))
+  ([program start state stop-marker]
+   (let [i (skip-spaces program start state)
+         [i typecode] (parse-symbol program i)
+         i (skip-spaces program i state)
+         [i symbols] (parse-symbols program i state stop-marker)]
+     [i [typecode symbols]])))
+
+(defnp add-essential
+  [li typecode symbols state]
+  (swap! state
+    (fn [s]
+      (let [p (:program s)]
+        (if-let [ti (get (:symbols p) typecode)]
+          (if (contains? (:constants p) ti)
+            (let [sis (vec (map
+                        (fn [sym]
+                          (if-let [si (get (:symbols p) sym)]
+                            si
+                            (throw (Exception. (str "Variable or constant " sym " not defined")))))
+                        symbols))]
+              (update-in s [:scope :essentials] assoc li [ti sis]))
+            (throw (Exception. (str "Type " typecode " not found in constants"))))
+          (throw (Exception. (str "Type " typecode " not found in constants"))))))))
+
 (defnp parse-essential-stmt
   [program start li state]
-  (loop [i start]
-    (if (end-stmt? program i)
-      (+ i 2)
-      (recur (inc i)))))
+  (let [[i [typecode symbols]] (parse-typed-symbols program start state)]
+    (add-essential li typecode symbols state)
+    i))
 
 (defnp parse-assertion-stmt
   [assertion-type program start li state]
@@ -152,14 +189,15 @@
 
 (defnp add-label
   [l state]
-  (swap! state
-    (fn [s]
-      (let [p (:program s)]
-        (if (or (contains? (:symbols p) l)
-                (contains? (:labels p) l))
-          (throw (Exception. (str "Label " l " was already defined before")))
-          (let [li (count (:labels p))]
-            (update-in s [:program :labels] assoc l li)))))))
+  (let [p (:program @state)
+        li (count (:labels p))]
+    (swap! state
+           (fn [s]
+             (if (or (contains? (:symbols p) l)
+                     (contains? (:labels p) l))
+               (throw (Exception. (str "Label " l " was already defined before")))
+               (update-in s [:program :labels] assoc l li))))
+    li))
 
 (defnp parse-labeled-stmt
   [program start state]
@@ -256,8 +294,9 @@
 (defnp parse-mm-program
   "Parse a metamath program"
   [program]
-  (let [state (atom {:program (Program. #{} #{} {} {} {} {} {} 0 "")
-                     :scope (Scope. #{} {} {} {} #{})
+  (let [state (atom {:program (Program. #{} #{} {} {}
+                                        (i/int-map) (i/int-map) (i/int-map) 0 "")
+                     :scope (Scope. #{} (i/int-map) (i/int-map) (i/int-map) #{})
                      :last-comment ""})]
     (parse-top-level program state)))
 
@@ -301,7 +340,7 @@
 (defn parse-mm
   "Parse a metamath file"
   [filename]
-  (let [[program pstats]
+  (let [[[program state] pstats]
         (profiled {}
                   (let [_ (print "Reading program from file... ")
                         _ (flush)
@@ -312,11 +351,12 @@
                         state (parse-mm-program bs)
                         _ (println "OK!")
                         program (:program state)]
-                    program))]
+                    [program state]))]
     ; (println (str (:comments program) " comments"))
     (println (str (count (:symbols program)) " symbols"))
     (println (str (count (:constants program)) " constants"))
     (println (str (count (:variables program)) " variables"))
+    (println (str (count (-> state :scope :essentials)) " essentials"))
     (let [formatting (:formatting program)
           symbolmap (create-symbol-map formatting)
           axioms (map #(split (trim %) #"\s+") (:axioms program))

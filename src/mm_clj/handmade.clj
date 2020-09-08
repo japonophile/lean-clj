@@ -354,8 +354,8 @@
                lines))))
 
 (defn assertion->tex
-  [assertion-symbols symbolmap]
-  (str "\\[" (join " " (map symbolmap assertion-symbols)) "\\]"))
+  [assertion-symbols symbolmap start end]
+  (str start (join " " (map symbolmap assertion-symbols)) end))
 
 (defn wrap-p
   [text]
@@ -379,11 +379,17 @@
 (def footer "</body>
 </html>")
 
+(defnp fmt-description
+  [desc symbolmap]
+  (reduce (fn [desc [txt syms]]
+            (str desc txt (assertion->tex (split (trim syms) #" ") symbolmap "\\(" "\\)")))
+          "" (partition 2 (split desc #"`"))))
+
 (defnp fmt-axiom
   [axiom symbolmap]
   (str
-    (wrap-p (second axiom))
-    (wrap-p (assertion->tex (first axiom) symbolmap))))
+    (wrap-p (fmt-description (second axiom) symbolmap))
+    (wrap-p (assertion->tex (first axiom) symbolmap "\\[" "\\]"))))
 
 (defn parse-mm
   "Parse a metamath file"
@@ -415,7 +421,6 @@
           formatting (:formatting program)
           symbolmap (create-symbol-map formatting)
           output (join "\n" (map #(fmt-axiom % symbolmap) axioms))]
-          ; ]
       ; (println (str "Formatting:\n" formatting))
       ; (println symbolmap))
       ; (println axioms)

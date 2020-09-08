@@ -12,7 +12,7 @@
 
 ;;; Program parsing stuff
 
-(defrecord Program [constants variables symbols labels vartypes axioms provables comments formatting])
+(defrecord Program [constants variables symbols symbolmap labels labelmap vartypes axioms provables comments formatting])
 (defrecord Scope [variables vartypes floatings essentials disjoints])
 
 (defn file->bytes [filename]
@@ -145,40 +145,60 @@
          [i symbols] (parse-symbols program i state stop-marker)]
      [i [typecode symbols]])))
 
+(defnp encode-typed-symbols
+  [typ syms state]
+  (let [symbols (-> state :program :symbols)
+        constants (-> state :program :constants)]
+    (if-let [ti (get symbols typ)]
+      (if (contains? constants ti)
+        (let [sis (vec (map
+                         (fn [sym]
+                           (if-let [si (get symbols sym)]
+                             si
+                             (throw (Exception. (str "Variable or constant " sym " not defined")))))
+                         syms))]
+          [ti sis])
+        (throw (Exception. (str "Type " typ " not found in constants"))))
+      (throw (Exception. (str "Type " typ " not found in constants"))))))
+
 (defnp add-essential
-  [li typecode symbols state]
+  [li typ syms state]
   (swap! state
     (fn [s]
-      (let [p (:program s)]
-        (if-let [ti (get (:symbols p) typecode)]
-          (if (contains? (:constants p) ti)
-            (let [sis (vec (map
-                        (fn [sym]
-                          (if-let [si (get (:symbols p) sym)]
-                            si
-                            (throw (Exception. (str "Variable or constant " sym " not defined")))))
-                        symbols))]
-              (update-in s [:scope :essentials] assoc li [ti sis]))
-            (throw (Exception. (str "Type " typecode " not found in constants"))))
-          (throw (Exception. (str "Type " typecode " not found in constants"))))))))
+      (let [ts (encode-typed-symbols typ syms s)]
+        (update-in s [:scope :essentials] assoc li ts)))))
 
 (defnp parse-essential-stmt
   [program start li state]
-  (let [[i [typecode symbols]] (parse-typed-symbols program start state)]
-    (add-essential li typecode symbols state)
+  (let [[i [typ syms]] (parse-typed-symbols program start state)]
+    (add-essential li typ syms state)
     i))
 
-(defnp parse-assertion-stmt
-  [assertion-type program start li state]
+(defnp add-assertion
+  [assertion-type li typ syms proof state]
+  (swap! state
+    (fn [s]
+      (let [[ti sis] (encode-typed-symbols typ syms s)]
+        (update-in s [:program assertion-type] assoc li [ti sis proof])))))
+
+(defnp parse-proof
+  [program start state]
   (loop [i start]
     (if (= (getchr program i) \$)
       (let [c (getchr program (inc i))]
         (if (= c \.)  ; (or (= c \.) (= c \=))
-          (let [assertion (substr program start i)]
-            (swap! state update-in [assertion-type] conj assertion)
-            (+ i 2))
+          (let [proof (substr program start i)]
+            [(+ i 2) proof])
           (recur (inc i))))
       (recur (inc i)))))
+
+(defnp parse-assertion-stmt
+  [assertion-type program start li state]
+  (let [stop-marker (if (= :axioms assertion-type) \. \=)
+        [i [typ syms]] (parse-typed-symbols program start state stop-marker)
+        [i proof] (if (= :axioms assertion-type) [i nil] (parse-proof program i state))]
+    (add-assertion assertion-type li typ syms proof state)
+    i))
 
 (defnp parse-disjoint-stmt
   [program start state]
@@ -196,7 +216,9 @@
              (if (or (contains? (:symbols p) l)
                      (contains? (:labels p) l))
                (throw (Exception. (str "Label " l " was already defined before")))
-               (update-in s [:program :labels] assoc l li))))
+               (-> s
+                 (update-in [:program :labels] assoc l li)
+                 (update-in [:program :labelmap] assoc li l)))))
     li))
 
 (defnp parse-labeled-stmt
@@ -236,8 +258,9 @@
           (throw (Exception. (str "Constant " c " was already defined before")))
           (let [ci (count (:symbols p))]
             (-> s
-                (update-in [:program :symbols] assoc c ci)
-                (update-in [:program :constants] conj ci))))))))
+              (update-in [:program :symbols] assoc c ci)
+              (update-in [:program :symbolmap] assoc ci c)
+              (update-in [:program :constants] conj ci))))))))
 
 (defnp add-variable
   [v state]
@@ -255,6 +278,7 @@
             (let [vi (count (:symbols p))]
               (-> s
                   (update-in [:program :symbols] assoc v vi)
+                  (update-in [:program :symbolmap] assoc vi v)
                   (update-in [:program :variables] conj vi)
                   (update-in [:scope :variables] conj vi)))))))))
 
@@ -294,7 +318,7 @@
 (defnp parse-mm-program
   "Parse a metamath program"
   [program]
-  (let [state (atom {:program (Program. #{} #{} {} {}
+  (let [state (atom {:program (Program. #{} #{} {} (i/int-map) {} (i/int-map)
                                         (i/int-map) (i/int-map) (i/int-map) 0 "")
                      :scope (Scope. #{} (i/int-map) (i/int-map) (i/int-map) #{})
                      :last-comment ""})]
@@ -357,15 +381,25 @@
     (println (str (count (:constants program)) " constants"))
     (println (str (count (:variables program)) " variables"))
     (println (str (count (-> state :scope :essentials)) " essentials"))
+    (println (str (count (:axioms program)) " axioms"))
+    (println (str (count (:provables program)) " provables"))
     (let [formatting (:formatting program)
           symbolmap (create-symbol-map formatting)
-          axioms (map #(split (trim %) #"\s+") (:axioms program))
+          axioms (:axioms program)
+          axioms (map (fn [[_ a]]
+                        (let [[ti sis _] a]
+                          (into [ti] sis)))
+                      axioms)
+          axioms (vec (map (fn [a]
+                        (vec (map #(get (:symbolmap program) %) a)))
+                      axioms))
           axioms (take-while #(not (= "CondEq" (get % 1))) axioms)
           axioms (filter #(not (= "wff" (first %))) axioms)
           output (join "\n" (map (comp wrap-p #(assertion->tex % symbolmap)) axioms))]
+          ; ]
       ; (println (str "Formatting:\n" formatting))
       ; (println symbolmap))
       ; (println axioms)
-      ; (spit "sample.html" (str header output footer))
+      (spit "sample.html" (str header output footer))
       (println (format-pstats pstats))
     )))

@@ -12,8 +12,14 @@
 
 ;;; Program parsing stuff
 
-(defrecord Program [constants variables symbols symbolmap labels labelmap vartypes axioms provables comments formatting])
-(defrecord Scope [variables vartypes floatings essentials disjoints])
+(defrecord Program [constants variables
+                    symbols symbolmap labels labelmap
+                    vartypes axioms provables
+                    comments formatting])
+(defrecord Assertion [label typ syms proof scope description])
+(defrecord Scope [variables vartypes
+                  floatings essentials disjoints
+                  mvars mhypos mdisjs])
 
 (defn file->bytes [filename]
   (with-open [xin (io/input-stream filename)
@@ -161,6 +167,11 @@
         (throw (Exception. (str "Type " typ " not found in constants"))))
       (throw (Exception. (str "Type " typ " not found in constants"))))))
 
+(defnp decode-typed-symbols
+  [ti sis state]
+  (let [symbolmap (-> state :program :symbolmap)]
+    (into [(get symbolmap ti)] (vec (map symbolmap sis)))))
+
 (defnp add-essential
   [li typ syms state]
   (swap! state
@@ -178,8 +189,11 @@
   [assertion-type li typ syms proof state]
   (swap! state
     (fn [s]
-      (let [[ti sis] (encode-typed-symbols typ syms s)]
-        (update-in s [:program assertion-type] assoc li [ti sis proof])))))
+      (let [[ti sis] (encode-typed-symbols typ syms s)
+            scope (:scope s)
+            desc (:last-comment s)
+            a (Assertion. li ti sis proof scope desc)]
+        (update-in s [:program assertion-type] assoc li a)))))
 
 (defnp parse-proof
   [program start state]
@@ -318,9 +332,13 @@
 (defnp parse-mm-program
   "Parse a metamath program"
   [program]
-  (let [state (atom {:program (Program. #{} #{} {} (i/int-map) {} (i/int-map)
-                                        (i/int-map) (i/int-map) (i/int-map) 0 "")
-                     :scope (Scope. #{} (i/int-map) (i/int-map) (i/int-map) #{})
+  (let [state (atom {:program (Program. #{} #{}
+                                        {} (i/int-map) {} (i/int-map)
+                                        (i/int-map) (i/int-map) (i/int-map)
+                                        0 "")
+                     :scope (Scope. #{} (i/int-map)
+                                    (i/int-map) (i/int-map) #{}
+                                    #{} [] [])
                      :last-comment ""})]
     (parse-top-level program state)))
 
@@ -361,6 +379,12 @@
 (def footer "</body>
 </html>")
 
+(defnp fmt-axiom
+  [axiom symbolmap]
+  (str
+    (wrap-p (second axiom))
+    (wrap-p (assertion->tex (first axiom) symbolmap))))
+
 (defn parse-mm
   "Parse a metamath file"
   [filename]
@@ -383,19 +407,14 @@
     (println (str (count (-> state :scope :essentials)) " essentials"))
     (println (str (count (:axioms program)) " axioms"))
     (println (str (count (:provables program)) " provables"))
-    (let [formatting (:formatting program)
+    (let [axioms (map (fn [[_ {ti :typ, sis :syms, desc :description}]]
+                        [(decode-typed-symbols ti sis state) desc])
+                      (:axioms program))
+          axioms (take-while #(not (= "CondEq" (get (first %) 1))) axioms)
+          axioms (filter #(not (= "wff" (first (first %)))) axioms)
+          formatting (:formatting program)
           symbolmap (create-symbol-map formatting)
-          axioms (:axioms program)
-          axioms (map (fn [[_ a]]
-                        (let [[ti sis _] a]
-                          (into [ti] sis)))
-                      axioms)
-          axioms (vec (map (fn [a]
-                        (vec (map #(get (:symbolmap program) %) a)))
-                      axioms))
-          axioms (take-while #(not (= "CondEq" (get % 1))) axioms)
-          axioms (filter #(not (= "wff" (first %))) axioms)
-          output (join "\n" (map (comp wrap-p #(assertion->tex % symbolmap)) axioms))]
+          output (join "\n" (map #(fmt-axiom % symbolmap) axioms))]
           ; ]
       ; (println (str "Formatting:\n" formatting))
       ; (println symbolmap))

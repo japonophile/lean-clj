@@ -16,6 +16,7 @@
                     symbols symbolmap labels labelmap
                     vartypes axioms provables
                     comments formatting])
+(defrecord Essential [label typ syms description])
 (defrecord Assertion [label typ syms proof scope description])
 (defrecord Scope [variables vartypes
                   floatings essentials disjoints
@@ -168,22 +169,59 @@
       (throw (Exception. (str "Type " typ " not found in constants"))))))
 
 (defnp decode-typed-symbols
-  [ti sis state]
-  (let [symbolmap (-> state :program :symbolmap)]
-    (into [(get symbolmap ti)] (vec (map symbolmap sis)))))
+  [{li :label, ti :typ, sis :syms :as ts} state]
+  (let [symbolmap (-> state :program :symbolmap)
+        labelmap (-> state :program :labelmap)]
+    (-> ts
+      (assoc :label (get labelmap li))
+      (assoc :typ (get symbolmap ti))
+      (assoc :syms (vec (map #(get symbolmap %) sis))))))
+
+(defnp decode-assertion
+  [assertion state]
+  (-> assertion
+    (decode-typed-symbols state)
+    (update-in [:scope :essentials]
+               #(into (i/int-map) (for [[li e] %] [li (decode-typed-symbols e state)])))))
 
 (defnp add-essential
   [li typ syms state]
   (swap! state
     (fn [s]
-      (let [ts (encode-typed-symbols typ syms s)]
-        (update-in s [:scope :essentials] assoc li ts)))))
+      (let [[ti sis] (encode-typed-symbols typ syms s)
+            desc (:last-comment s)
+            e (Essential. li ti sis desc)]
+        (update-in s [:scope :essentials] assoc li e)))))
 
 (defnp parse-essential-stmt
   [program start li state]
   (let [[i [typ syms]] (parse-typed-symbols program start state)]
     (add-essential li typ syms state)
     i))
+
+(defnp mandatory-variables
+  "Return the set of mandatory variables of an assertion"
+  [assertion]
+  (into #{}
+    (apply concat
+      (conj (map (fn [e]
+                   (filter #(contains? (-> assertion :scope :variables) %) (:syms e)))
+                 (vals (-> assertion :scope :essentials)))
+            (filter #(contains? (-> assertion :scope :variables) %) (:syms assertion))))))
+
+(defnp mandatory-hypotheses
+  "Return the list of mandatory hypotheses of an assertion in order of appearance"
+  [assertion]
+  (sort (into []
+    (concat
+      (let [mvars (-> assertion :scope :mvars)]
+        (map (fn [v]
+               (first (keep (fn [[label floating]]
+                              (when (= v (:variable floating))
+                                label))
+                            (-> assertion :scope :floatings))))
+             mvars))
+      (keys (-> assertion :scope :essentials))))))
 
 (defnp add-assertion
   [assertion-type li typ syms proof state]
@@ -192,7 +230,11 @@
       (let [[ti sis] (encode-typed-symbols typ syms s)
             scope (:scope s)
             desc (:last-comment s)
-            a (Assertion. li ti sis proof scope desc)]
+            a (Assertion. li ti sis proof scope desc)
+            a (assoc-in a [:scope :mvars] (mandatory-variables a))
+            a (assoc-in a [:scope :mhypos] (mandatory-hypotheses a))
+            ; TODO disjoints
+            ]
         (update-in s [:program assertion-type] assoc li a)))))
 
 (defnp parse-proof
@@ -355,11 +397,44 @@
 
 (defn assertion->tex
   [assertion-symbols symbolmap start end]
-  (str start (join " " (map symbolmap assertion-symbols)) end))
+  (if (> (count assertion-symbols) 0)
+    (str start (join " " (map symbolmap assertion-symbols)) end)
+    ""))
 
 (defn wrap-p
   [text]
   (str "<p>" text "</p>"))
+
+(defn wrap-li
+  [text]
+  (str "<li>" text "</li>"))
+
+(defnp fmt-description
+  [desc symbolmap]
+  (reduce (fn [desc [txt & [syms]]]
+            (str desc txt
+                 (if (nil? syms)
+                   ""
+                   (assertion->tex (split (trim syms) #" ") symbolmap "\\(" "\\)"))))
+          "" (partition-all 2 (split desc #"`"))))
+
+(defnp fmt-hypothese
+  [hypo symbolmap]
+  ; (wrap-li (assertion->tex (into [(:typ hypo)] (:syms hypo)) symbolmap "\\[" "\\]")))
+  (wrap-li (assertion->tex (into [(:typ hypo)] (:syms hypo)) symbolmap "\\(" "\\)")))
+
+(defnp fmt-axiom
+  [axiom symbolmap]
+  (apply str (concat
+    [(wrap-p (fmt-description (:description axiom) symbolmap))]
+    (if-let [essentials (vals (-> axiom :scope :essentials))]
+      (concat
+        ["<ul>"]
+        (vec (map #(fmt-hypothese % symbolmap) essentials))
+        ["</ul>"])
+      [])
+    ; [(wrap-p (assertion->tex (into [(:typ axiom)] (:syms axiom)) symbolmap "\\[" "\\]"))])))
+    [(wrap-p (assertion->tex (into [(:typ axiom)] (:syms axiom)) symbolmap "\\(" "\\)"))])))
 
 (def header "<!DOCTYPE html>
 <html>
@@ -378,18 +453,6 @@
 
 (def footer "</body>
 </html>")
-
-(defnp fmt-description
-  [desc symbolmap]
-  (reduce (fn [desc [txt syms]]
-            (str desc txt (assertion->tex (split (trim syms) #" ") symbolmap "\\(" "\\)")))
-          "" (partition 2 (split desc #"`"))))
-
-(defnp fmt-axiom
-  [axiom symbolmap]
-  (str
-    (wrap-p (fmt-description (second axiom) symbolmap))
-    (wrap-p (assertion->tex (first axiom) symbolmap "\\[" "\\]"))))
 
 (defn parse-mm
   "Parse a metamath file"
@@ -410,20 +473,14 @@
     (println (str (count (:symbols program)) " symbols"))
     (println (str (count (:constants program)) " constants"))
     (println (str (count (:variables program)) " variables"))
-    (println (str (count (-> state :scope :essentials)) " essentials"))
     (println (str (count (:axioms program)) " axioms"))
     (println (str (count (:provables program)) " provables"))
-    (let [axioms (map (fn [[_ {ti :typ, sis :syms, desc :description}]]
-                        [(decode-typed-symbols ti sis state) desc])
-                      (:axioms program))
-          axioms (take-while #(not (= "CondEq" (get (first %) 1))) axioms)
-          axioms (filter #(not (= "wff" (first (first %)))) axioms)
+    (let [axioms (map #(decode-assertion % state) (vals (:axioms program)))
+          axioms (take-while #(not (= "CondEq" (get (:syms %) 0))) axioms)
+          axioms (filter #(not (= "wff" (:typ %))) axioms)
           formatting (:formatting program)
           symbolmap (create-symbol-map formatting)
           output (join "\n" (map #(fmt-axiom % symbolmap) axioms))]
-      ; (println (str "Formatting:\n" formatting))
-      ; (println symbolmap))
-      ; (println axioms)
       (spit "sample.html" (str header output footer))
       (println (format-pstats pstats))
     )))

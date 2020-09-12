@@ -1,8 +1,9 @@
 (ns mm-clj.handmade
   (:require
     [clojure.java.io :as io]
-    [clojure.string :refer [includes? join split split-lines trim]]
+    [clojure.string :refer [includes? join split split-lines starts-with? trim]]
     [clojure.data.int-map :as i]
+    [hiccup.core :as h]
     [taoensso.tufte :as tufte :refer [defnp profiled format-pstats]])
   (:import
     java.util.Arrays))
@@ -401,46 +402,55 @@
     (str start (join " " (map symbolmap assertion-symbols)) end)
     ""))
 
-(defn wrap-p
-  [text]
-  (str "<p>" text "</p>"))
+(defn subst-refs
+  [txt]
+  (let [[beginning & tokens] (split txt #"~ ")]
+    (reduce (fn [desc token]
+              (let [[label & otherwords] (split token #" ")
+                    link (if (starts-with? label "http") label (str "#" label))]
+                (str desc " " (h/html [:a {:href link} label])
+                     " " (join " " otherwords))))
+            beginning tokens)))
 
-(defn wrap-li
-  [text]
-  (str "<li>" text "</li>"))
+(defn split-title-desc
+  [txt]
+  (let [[t & r] (split txt #"\.")]
+    (if (< (count t) 80)
+      [(str t ".") (join "." r)]
+      [nil txt])))
 
 (defnp fmt-description
   [desc symbolmap]
-  (reduce (fn [desc [txt & [syms]]]
-            (str desc txt
-                 (if (nil? syms)
-                   ""
-                   (assertion->tex (split (trim syms) #" ") symbolmap "\\(" "\\)"))))
-          "" (partition-all 2 (split desc #"`"))))
+  (let [d (reduce (fn [desc [txt & [syms]]]
+                    (str desc txt
+                         (if (nil? syms)
+                           ""
+                           (assertion->tex (split (trim syms) #" ") symbolmap "\\(" "\\)"))))
+                  "" (partition-all 2 (split desc #"`")))
+        [t d] (split-title-desc d)]
+    (if t
+      [:p [:span.title (subst-refs t)] (subst-refs d)]
+      [:p (subst-refs d)])))
 
 (defnp fmt-hypothese
   [hypo symbolmap]
-  ; (wrap-li (assertion->tex (into [(:typ hypo)] (:syms hypo)) symbolmap "\\[" "\\]")))
-  (wrap-li (assertion->tex (into [(:typ hypo)] (:syms hypo)) symbolmap "\\(" "\\)")))
+  [:li (assertion->tex (into [(:typ hypo)] (:syms hypo)) symbolmap "\\(" "\\)")])
 
 (defnp fmt-axiom
   [axiom symbolmap]
-  (apply str (concat
-    [(wrap-p (fmt-description (:description axiom) symbolmap))]
-    (if-let [essentials (vals (-> axiom :scope :essentials))]
-      (concat
-        ["<ul>"]
-        (vec (map #(fmt-hypothese % symbolmap) essentials))
-        ["</ul>"])
-      [])
-    ; [(wrap-p (assertion->tex (into [(:typ axiom)] (:syms axiom)) symbolmap "\\[" "\\]"))])))
-    [(wrap-p (assertion->tex (into [(:typ axiom)] (:syms axiom)) symbolmap "\\(" "\\)"))])))
+  (let [l (:label axiom)]
+    (h/html [:div.theorem {:id l}
+             [:p (fmt-description (:description axiom) symbolmap)]
+             (if-let [essentials (vals (-> axiom :scope :essentials))]
+               [:ul (map #(fmt-hypothese % symbolmap) essentials)])
+             [:p (assertion->tex (into [(:typ axiom)] (:syms axiom)) symbolmap "\\(" "\\)")]])))
 
 (def header "<!DOCTYPE html>
 <html>
 <head>
   <meta charset=\"utf-8\">
   <meta name=\"viewport\" content=\"width=device-width\">
+  <link rel=\"stylesheet\" href=\"style/main.css\">
   <title>Metamath sample</title>
   <script src=\"https://polyfill.io/v3/polyfill.min.js?features=es6\"></script>
   <script id=\"MathJax-script\" async

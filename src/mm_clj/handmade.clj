@@ -1,7 +1,7 @@
 (ns mm-clj.handmade
   (:require
     [clojure.java.io :as io]
-    [clojure.string :refer [includes? join split split-lines starts-with? trim]]
+    [clojure.string :as s :refer [includes? join split split-lines starts-with? trim]]
     [clojure.data.int-map :as i]
     [hiccup.core :as h]
     [taoensso.tufte :as tufte :refer [defnp profiled format-pstats]])
@@ -16,9 +16,11 @@
 (defrecord Program [constants variables
                     symbols symbolmap labels labelmap
                     vartypes axioms provables
+                    structure
                     comments formatting])
 (defrecord Essential [label typ syms description])
-(defrecord Assertion [label typ syms proof scope description])
+(defrecord Assertion [label typ syms proof scope
+                      category title description])
 (defrecord Scope [variables vartypes
                   floatings essentials disjoints
                   mvars mhypos mdisjs])
@@ -50,6 +52,27 @@
   [program i]
   `(next-chars-match? ~program ~i \$ \.))
 
+(defnp update-structure!
+  [state text]
+  (swap! state update-in [:program :structure]
+    (fn [structure]
+      (loop [s structure
+             [l & lines] (split-lines text)]
+        (cond
+          (nil? l)
+            s
+          (starts-with? l "#*#*#*#*")
+            (conj s {:title (trim (first lines))
+                     :description (trim (join "\n" (nthrest lines 2)))
+                     :subs []})
+          (starts-with? l "=-=-=-=-")
+            (update-in s [(dec (count s)) :subs]
+                       conj {:title (trim (first lines))
+                             :description (trim (join "\n" (nthrest lines 2)))
+                             :assertions []})
+          :else
+            (recur s lines))))))
+
 (defnp parse-comment
   [program start state]
   (loop [i start]
@@ -58,6 +81,7 @@
         \( (throw (Exception. "Comments may not be nested"))
         \) (let [text (substr program start i)]
              (swap! state update-in [:program :comments] inc)
+             (update-structure! state text)
              (swap! state assoc :last-comment text)
              (when (:in-formatting @state)
                (swap! state assoc-in [:program :formatting] text)
@@ -224,19 +248,57 @@
              mvars))
       (keys (-> assertion :scope :essentials))))))
 
+(defnp update-structure-add-assertion
+  [state li]
+  (update-in state [:program :structure]
+    (fn [sections]
+      (let [i (dec (count sections))
+            j (dec (count (:subs (get sections i))))]
+        (if (<= 0 j)
+          (update-in sections [i :subs j :assertions] conj li)
+          ; if no subsection, add a dummy one
+          (update-in sections [i :subs] conj
+                     {:title ""
+                      :description ""
+                      :assertions [li]}))))))
+
+(defnp split-title-desc
+  [txt]
+  (let [[t & r] (split txt #"\.")
+        [t r] (if (odd? (count (re-seq #"`" t)))
+                [(join "." [t (first r)]) (rest r)]
+                [t r])]
+    (if (< (count t) 80)
+      [(str t ".") (join "." r)]
+      [nil txt])))
+
+(defnp assertion-category
+  [li state]
+  (let [label (get (-> state :program :labelmap) li)]
+    (cond
+      (starts-with? label "ax-") :axiom
+      (starts-with? label "ax") :theorem
+      (starts-with? label "df-") :definition
+      (starts-with? label "w") :declaration
+      :else :other)))
+
 (defnp add-assertion
   [assertion-type li typ syms proof state]
   (swap! state
     (fn [s]
       (let [[ti sis] (encode-typed-symbols typ syms s)
             scope (:scope s)
-            desc (:last-comment s)
-            a (Assertion. li ti sis proof scope desc)
+            txt (:last-comment s)
+            [title desc] (split-title-desc txt)
+            categ (assertion-category li s)
+            a (Assertion. li ti sis proof scope categ title desc)
             a (assoc-in a [:scope :mvars] (mandatory-variables a))
             a (assoc-in a [:scope :mhypos] (mandatory-hypotheses a))
             ; TODO disjoints
             ]
-        (update-in s [:program assertion-type] assoc li a)))))
+        (-> s
+          (update-in [:program assertion-type] assoc li a)
+          (update-structure-add-assertion li))))))
 
 (defnp parse-proof
   [program start state]
@@ -378,14 +440,14 @@
   (let [state (atom {:program (Program. #{} #{}
                                         {} (i/int-map) {} (i/int-map)
                                         (i/int-map) (i/int-map) (i/int-map)
-                                        0 "")
+                                        [] 0 "")
                      :scope (Scope. #{} (i/int-map)
                                     (i/int-map) (i/int-map) #{}
                                     #{} [] [])
                      :last-comment ""})]
     (parse-top-level program state)))
 
-(defn create-symbol-map
+(defnp create-symbol-map
   [formatting]
   (let [lines (->> formatting
                   (split-lines)
@@ -396,53 +458,79 @@
                     [(or l1 l2) (or r1 r2)]))
                lines))))
 
-(defn assertion->tex
+(defnp map-symbols
+  [symbolmap symbols]
+  (map (fn [s]
+         (let [sym (symbolmap s)]
+           (if (= " & " sym) " \\& " sym)))
+       symbols))
+
+(defnp assertion->tex
   [assertion-symbols symbolmap start end]
   (if (> (count assertion-symbols) 0)
-    (str start (join " " (map symbolmap assertion-symbols)) end)
+    (str start (join " " (map-symbols symbolmap assertion-symbols)) end)
     ""))
 
-(defn subst-refs
+(defnp text->tex
+  [text symbolmap]
+  (reduce (fn [buffer [txt & [syms]]]
+            (str buffer txt
+                 (if (nil? syms)
+                   ""
+                   (assertion->tex (split (trim syms) #" ") symbolmap "\\(" "\\)"))))
+          "" (partition-all 2 (split text #"`"))))
+
+(defnp subst-refs
   [txt]
   (let [[beginning & tokens] (split txt #"~ ")]
-    (reduce (fn [desc token]
+    (reduce (fn [buffer token]
               (let [[label & otherwords] (split token #" ")
                     link (if (starts-with? label "http") label (str "#" label))]
-                (str desc " " (h/html [:a {:href link} label])
+                (str buffer " " (h/html [:a {:href link} label])
                      " " (join " " otherwords))))
             beginning tokens)))
 
-(defn split-title-desc
+(defnp apply-emphasis
   [txt]
-  (let [[t & r] (split txt #"\.")]
-    (if (< (count t) 80)
-      [(str t ".") (join "." r)]
-      [nil txt])))
+  (s/replace txt #"_([^_ ][^_]*[^_ ])_" (h/html [:em "$1"])))
 
-(defnp fmt-description
-  [desc symbolmap]
-  (let [d (reduce (fn [desc [txt & [syms]]]
-                    (str desc txt
-                         (if (nil? syms)
-                           ""
-                           (assertion->tex (split (trim syms) #" ") symbolmap "\\(" "\\)"))))
-                  "" (partition-all 2 (split desc #"`")))
-        [t d] (split-title-desc d)]
-    (if t
-      [:p [:span.title (subst-refs t)] (subst-refs d)]
-      [:p (subst-refs d)])))
+(defnp fmt-text
+  [txt symbolmap]
+  (-> txt
+    (text->tex symbolmap)
+    (subst-refs)
+    (apply-emphasis)))
+
+(defnp fmt-title-desc
+  [title desc symbolmap]
+  (if title
+    [:p [:span.title (fmt-text title symbolmap)] (fmt-text desc symbolmap)]
+    [:p (fmt-text desc symbolmap)]))
 
 (defnp fmt-hypothese
   [hypo symbolmap]
-  [:li (assertion->tex (into [(:typ hypo)] (:syms hypo)) symbolmap "\\(" "\\)")])
+  [:p (assertion->tex (into [(:typ hypo)] (:syms hypo)) symbolmap "\\(" "\\)")])
+
+(defnp assertion-categ
+  [assertion]
+  (condp = (:category assertion)
+    :axiom "Axiom"
+    :theorem "Theorem"
+    :definition "Definition"
+    :declaration "Declaration"
+    ""))
 
 (defnp fmt-axiom
   [axiom symbolmap]
   (let [l (:label axiom)]
     (h/html [:div.theorem {:id l}
-             [:p (fmt-description (:description axiom) symbolmap)]
-             (if-let [essentials (vals (-> axiom :scope :essentials))]
-               [:ul (map #(fmt-hypothese % symbolmap) essentials)])
+             [:p [:span {:class (str "title " (name (:category axiom)))} (assertion-categ axiom)]]
+             (fmt-title-desc (:title axiom) (:description axiom) symbolmap)
+             (when-let [essentials (vals (-> axiom :scope :essentials))]
+               [:div
+                [:p "If"]
+                [:div (map #(fmt-hypothese % symbolmap) essentials)]
+                [:p "Then"]])
              [:p (assertion->tex (into [(:typ axiom)] (:syms axiom)) symbolmap "\\(" "\\)")]])))
 
 (def header "<!DOCTYPE html>
@@ -463,6 +551,31 @@
 
 (def footer "</body>
 </html>")
+
+(defn print-truncated
+  [txt]
+  (let [n (count txt)]
+    (when (< 0 n)
+      (if (< n 50)
+        (println (str "      " txt))
+        (println (str "      " (subs txt 0 50) "..."))))))
+
+(defn print-structure
+  [structure]
+  (println "Program structure")
+  (loop [[section & othersections] structure
+         i 1]
+    (when section
+      (println (str "  " i ". " (:title section)))
+      (print-truncated (:description section))
+      (loop [[subsection & othersubsections] (:subs section)
+             j 1]
+        (when subsection
+          (println (str "    " i "." j " " (:title subsection)))
+          (print-truncated (:description subsection))
+          (println (str "      " (count (:assertions subsection)) " assertions"))
+          (recur othersubsections (inc j))))
+      (recur othersections (inc i)))))
 
 (defn parse-mm
   "Parse a metamath file"
@@ -485,6 +598,7 @@
     (println (str (count (:variables program)) " variables"))
     (println (str (count (:axioms program)) " axioms"))
     (println (str (count (:provables program)) " provables"))
+    (print-structure (:structure program))
     (let [axioms (map #(decode-assertion % state) (vals (:axioms program)))
           axioms (take-while #(not (= "CondEq" (get (:syms %) 0))) axioms)
           axioms (filter #(not (= "wff" (:typ %))) axioms)
@@ -492,5 +606,5 @@
           symbolmap (create-symbol-map formatting)
           output (join "\n" (map #(fmt-axiom % symbolmap) axioms))]
       (spit "sample.html" (str header output footer))
-      (println (format-pstats pstats))
+      ; (println (format-pstats pstats))
     )))

@@ -1,3 +1,6 @@
+* {
+    font-family: Arial;
+}
 div.theorem {
     border: 1px solid #dedede;
     border-radius: 10px;
@@ -7,4 +10,8 @@ div.theorem {
 span.title {
     font-weight:bold;
 }
+span.theorem { color: orange; }
+span.axiom { color: red; }
+span.definition { color: blue; }
+span.declaration { color: blue; }
 

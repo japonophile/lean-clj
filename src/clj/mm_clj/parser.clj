@@ -3,26 +3,13 @@
     [clojure.java.io :as io]
     [clojure.string :as s :refer [join split split-lines starts-with? trim]]
     [clojure.data.int-map :as i]
+    [mm-clj.model :refer [Program Essential Assertion Scope]]
     [taoensso.tufte :as tufte :refer [defnp profiled format-pstats]])
   (:import
     java.util.Arrays))
 
 
 (set! *warn-on-reflection* true)
-
-;;; Program parsing stuff
-
-(defrecord Program [constants variables
-                    symbols symbolmap labels labelmap
-                    vartypes axioms provables
-                    structure
-                    comments formatting])
-(defrecord Essential [label typ syms description])
-(defrecord Assertion [label typ syms proof scope
-                      category title description])
-(defrecord Scope [variables vartypes
-                  floatings essentials disjoints
-                  mvars mhypos mdisjs])
 
 (defn file->bytes [filename]
   (with-open [xin (io/input-stream filename)

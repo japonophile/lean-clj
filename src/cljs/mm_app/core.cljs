@@ -1,0 +1,187 @@
+(ns mm-app.core
+  (:require-macros [cljs.core.async.macros :refer [go]])
+  (:require
+   [reagent.core :as reagent :refer [atom]]
+   [reagent.dom :as rdom]
+   [reagent.session :as session]
+   [reitit.frontend :as reitit]
+   [clerk.core :as clerk]
+   [accountant.core :as accountant]
+   [cljs-http.client :as http]
+   [cljs.core.async :refer [<!]]
+   [clojure.string :refer [replace]]
+   [cljs.reader :refer [read-string]]
+   [mm-clj.formatting :as fmt]))
+
+
+(defn remove-record-refs
+  [s]
+  (-> s
+      (replace "#mm_clj.model.Program" "")
+      (replace "#mm_clj.model.Assertion" "")
+      (replace "#mm_clj.model.Essential" "")
+      (replace "#mm_clj.model.Scope" "")))
+
+;; -------------------------
+;; Routes
+
+(def router
+  (reitit/router
+   [["/" :index]
+    ["/section"
+     ["/:section-id" :section]
+     ["/:section-id/:subs-id" :subsection]]
+    ["/api/state"
+     ["/symbolmap" :load-symbolmap]
+     ["/structure" :load-structure]
+     ["/axioms/:section-id/:subs-id" :load-axioms]]
+    ["/about" :about]]))
+
+(defn path-for [route & [params]]
+  (if params
+    (:path (reitit/match-by-name router route params))
+    (:path (reitit/match-by-name router route))))
+
+;; -------------------------
+;; State
+
+(defonce state (atom {}))
+
+(defn load-symbolmap
+  []
+  (go (let [response (<! (http/get (path-for :load-symbolmap)))]
+        (swap! state assoc-in [:program :symbolmap] (read-string (:body response))))))
+
+(defn load-structure
+  []
+  (go (let [response (<! (http/get (path-for :load-structure)))]
+        (swap! state assoc-in [:program :structure] (read-string (:body response))))))
+
+(defn load-axioms
+  [sec-id subs-id]
+  (go (let [response (<! (http/get
+                           (path-for :load-axioms {:section-id sec-id :subs-id subs-id})))]
+        (swap! state assoc-in [:program :axioms sec-id subs-id]
+               (read-string (remove-record-refs (:body response)))))))
+
+;; -------------------------
+;; Page components
+
+(defn home-page []
+  (fn []
+    [:span.main
+     [:h1 "Metamath app"]
+     [:div ""]]))
+
+(defn table-of-contents []
+  (fn []
+    [:span.main
+     [:h1 "Table of Contents"]
+     [:ul (map-indexed
+            (fn [sec-id section]
+              [:li {:name (str "section-" sec-id) :key (str "section-" sec-id)}
+               [:a {:href (path-for :section {:section-id sec-id})} (:title section)]])
+            (-> @state :program :structure))]]))
+
+(defn section-page []
+  (fn []
+    (let [routing-data (session/get :route)
+          sec-id (int (get-in routing-data [:route-params :section-id]))
+          structure (-> @state :program :structure)
+          section (get structure sec-id)]
+      [:span.main
+       [:p [:a {:href (path-for :index)} "Home"]]
+       [:h1 (:title section)]
+       [:p (:description section)]
+       [:ul (map-indexed
+              (fn [subs-id subsection]
+                [:li {:name (str "subs-" subs-id) :key (str "subs-" subs-id)}
+                 [:a {:href (path-for :subsection {:section-id sec-id :subs-id subs-id})}
+                  (:title subsection)]])
+              (:subs section))]])))
+
+(defn subsection-page []
+  (fn []
+    (let [routing-data (session/get :route)
+          sec-id (int (get-in routing-data [:route-params :section-id]))
+          structure (-> @state :program :structure)
+          section (get structure sec-id)
+          subs-id (int (get-in routing-data [:route-params :subs-id]))
+          subsection (get-in section [:subs subs-id])]
+      [:span.main
+       [:p [:a {:href (path-for :index)} "Home"] " >> "
+        [:a {:href (path-for :section {:section-id sec-id})} (:title section)]]
+       [:h1 (:title subsection)]
+       [:p (:description subsection)]
+       (if-let [axioms (get-in @state [:program :axioms sec-id subs-id])]
+         [:div (fmt/format-axioms axioms (-> @state :program :symbolmap))]
+         [:a {:on-click (fn [_] (load-axioms sec-id subs-id))}
+          (str (count (:assertions subsection)) " assertions.")])])))
+
+(defn about-page []
+  (fn [] [:span.main
+          [:h1 "About Metamath app"]]))
+
+
+;; -------------------------
+;; Translate routes -> page components
+
+(defn page-for [route]
+  (case route
+    :index #'home-page
+    :toc #'table-of-contents
+    :section #'section-page
+    :subsection #'subsection-page
+    :about #'about-page))
+
+
+;; -------------------------
+;; Page mounting component
+
+(defn current-page []
+  (fn []
+    (let [page (:current-page (session/get :route))]
+      [:div
+       [:header
+        [:p [:a {:href (path-for :index)} "Home"] " | "
+         (when (= (count (get-in @state [:program :structure])) 0)
+           [:span [:a {:on-click (fn [_] (load-symbolmap) (load-structure))} "Load"] " | "])
+         [:a {:href (path-for :about)} "About Metamath app"]]]
+       [:div.mainlayout
+        [:div.leftpane [(page-for :toc)]]
+        [:div.mainpane [page]]
+        [:div.rightpane ""]]
+       [:footer
+        [:p "Metamath app was generated by the "
+         [:a {:href "https://github.com/reagent-project/reagent-template"} "Reagent Template"] "."]]])))
+
+(def current-page-mathjs
+  (with-meta current-page
+    {:component-did-update (fn [_] (. js/MathJax typeset))}))
+
+;; -------------------------
+;; Initialize app
+
+(defn mount-root []
+  (load-symbolmap)
+  (load-structure)
+  (rdom/render [current-page-mathjs] (.getElementById js/document "app")))
+
+(defn init! []
+  (clerk/initialize!)
+  (accountant/configure-navigation!
+   {:nav-handler
+    (fn [path]
+      (let [match (reitit/match-by-path router path)
+            current-page (:name (:data  match))
+            route-params (:path-params match)]
+        (reagent/after-render clerk/after-render!)
+        (session/put! :route {:current-page (page-for current-page)
+                              :route-params route-params})
+        (clerk/navigate-page! path)
+        ))
+    :path-exists?
+    (fn [path]
+      (boolean (reitit/match-by-path router path)))})
+  (accountant/dispatch-current!)
+  (mount-root))

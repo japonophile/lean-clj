@@ -1,6 +1,6 @@
 (ns mm-clj.core
   (:require
-    ; [mm-clj.insta :as p]
+    ; [mm-clj.insta.insta :as p]
     [mm-clj.parser :as p]
     [mm-clj.renderer :as r]))
 

@@ -1,4 +1,4 @@
-(ns mm-clj.insta
+(ns mm-clj.insta.insta
   (:require
     [clojure.java.io :as io]
     [clojure.math.combinatorics :refer [combinations cartesian-product]]
@@ -32,14 +32,14 @@
            (.append b (subs text from))
            (str b)))))))
 
-(def mm-parser (insta/parser (io/resource "mm_clj/mm.bnf")))
+(def mm-parser (insta/parser (io/resource "mm_clj/insta/mm.bnf")))
 
 (def mm-top-parser (insta/parser
-                     (str (slurp (io/resource "mm_clj/mm-top.bnf"))
-                          (slurp (io/resource "mm_clj/mm-core.bnf")))))
+                     (str (slurp (io/resource "mm_clj/insta/mm-top.bnf"))
+                          (slurp (io/resource "mm_clj/insta/mm-core.bnf")))))
 (def mm-block-parser (insta/parser
-                       (str (slurp (io/resource "mm_clj/mm-block.bnf"))
-                            (slurp (io/resource "mm_clj/mm-core.bnf")))))
+                       (str (slurp (io/resource "mm_clj/insta/mm-block.bnf"))
+                            (slurp (io/resource "mm_clj/insta/mm-core.bnf")))))
 
 (def read-file)
 

@@ -326,7 +326,7 @@
           (throw (Exception. (str i ": unexpected token $" (getchr program (inc i))))))
         (throw (Exception. (str i ": unexpected token " (getchr program i))))))))
 
-(def parse-stmt)
+(declare parse-stmt)
 
 (defnp parse-block
   [program start state]
@@ -385,6 +385,8 @@
 (defnp parse-stmt
   [program start state]
   (loop [i start]
+    (if-let [progress (:progress @state)]
+      (swap! progress assoc :progress i))
     (let [i (skip-spaces program i state)]
       (if (= (getchr program i) \$)
         (case (getchr program (inc i))
@@ -407,7 +409,7 @@
 
 (defnp parse-mm-program
   "Parse a metamath program"
-  [program]
+  [program progress]
   (let [state (atom {:program (Program. #{} #{}
                                         {} (i/int-map) {} (i/int-map)
                                         (i/int-map) (i/int-map) (i/int-map)
@@ -415,22 +417,24 @@
                      :scope (Scope. #{} (i/int-map)
                                     (i/int-map) (i/int-map) #{}
                                     #{} [] [])
-                     :last-comment ""})]
+                     :last-comment ""
+                     :progress progress})]
     (parse-top-level program state)))
 
 (defn parse-mm
   "Parse a metamath file"
-  [filename & {:keys [print-stats] :or {print-stats false}}]
+  [filename & {:keys [print-stats progress] :or {print-stats false progress nil}}]
   (let [[state pstats]
         (profiled {}
                   (let [_ (print "Reading program from file... ")
                         _ (flush)
                         bs (file->bytes filename)
                         _ (println "OK!")
-                        _ (print "Parsing program... ")
-                        _ (flush)
-                        state (parse-mm-program bs)
-                        _ (println "OK!")]
+                        _ (if progress
+                            (swap! progress assoc :total (count bs)))
+                        state (parse-mm-program bs progress)
+                        _ (if progress
+                            (swap! progress assoc :progress (count bs)))]
                     state))]
     (when print-stats
       (println (format-pstats pstats)))

@@ -23,7 +23,8 @@
                  [pez/clerk "1.0.0"]
                  [venantius/accountant "0.2.5"
                   :exclusions [org.clojure/tools.reader]]
-                 [cljs-http "0.1.46"]]
+                 [cljs-http "0.1.46"]
+                 [progrock "0.1.2"]]
 
   :plugins [[lein-environ "1.1.0"]
             [lein-cljsbuild "1.1.7"]

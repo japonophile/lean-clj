@@ -6,6 +6,8 @@ A [metamath](http:us.metamath.org) parser written in Clojure.
 
 ## Usage
 
+1. To just parse a single Metamath file
+
     lein run <filename>
 
 E.g.
@@ -17,6 +19,14 @@ E.g.
     lein run mm/twoplustwo.mm
     lein run mm/lib/peano.mm
     lein run mm/lib/set.mm
+
+1. To start a web server and interactively display the content of Metamath files
+
+```
+lein do clean, run
+```
+
+The application will now be available at [http://localhost:3000](http://localhost:3000).
 
 ## Run tests
 
@@ -30,16 +40,6 @@ E.g.
   - used Peter Taoussanis' [`tufte`](https://github.com/ptaoussanis/tufte) library for profiling and it helped a lot
   - we are still nowhere compared to the Rust implementation ( https://github.com/japonophile/minimast )
   - parsing: `4.14 min`, proof verification: `1.67 min`
-
-
-## License
-
-Copyright © 2020 Antoine Choppin ( Eclipse Public License 2.0 http://www.eclipse.org/legal/epl-2.0 )
-
-
-# mm-app
-
-Keeping this in for now...
 
 ## Development mode
 
@@ -86,42 +86,7 @@ and stopped by running:
 lein do clean, uberjar
 ```
 
-## Deploying to Heroku
+## License
 
-Make sure you have [Git](http://git-scm.com/downloads) and [Heroku toolbelt](https://toolbelt.heroku.com/) installed, then simply follow the steps below.
+Copyright © 2020 Antoine Choppin ( Eclipse Public License 2.0 http://www.eclipse.org/legal/epl-2.0 )
 
-Optionally, test that your application runs locally with foreman by running.
-
-```
-foreman start
-```
-
-Now, you can initialize your git repo and commit your application.
-
-```
-git init
-git add .
-git commit -m "init"
-```
-create your app on Heroku
-
-```
-heroku create
-```
-
-optionally, create a database for the application
-
-```
-heroku addons:add heroku-postgresql
-```
-
-The connection settings can be found at your [Heroku dashboard](https://dashboard.heroku.com/apps/) under the add-ons for the app.
-
-deploy the application
-
-```
-git push heroku master
-```
-
-Your application should now be deployed to Heroku!
-For further instructions see the [official documentation](https://devcenter.heroku.com/articles/clojure).

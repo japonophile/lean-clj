@@ -35,7 +35,7 @@
 
   :min-lein-version "2.5.0"
   :uberjar-name "mm-app.jar"
-  :main mm-app.server
+  :main mm-app.core
   ; :aot [mm-clj.insta.ParseException]
   :clean-targets ^{:protect false}
   [:target-path

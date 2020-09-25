@@ -1,11 +1,10 @@
 (ns mm-clj.core
   (:require
     ; [mm-clj.insta.insta :as p]
-    [mm-clj.parser :as p]
-    [mm-clj.renderer :as r]))
+    [mm-clj.parser :as p]))
 
 
-(defn -main
+(defn parse-mm
   "A Metamath parser written in Clojure. Fun everywhere!"
   [filename]
   (try
@@ -15,6 +14,5 @@
       (println (str (count (:constants program)) " constants"))
       (println (str (count (:variables program)) " variables"))
       (println (str (count (:axioms program)) " axioms"))
-      (println (str (count (:provables program)) " provables"))
-      (r/render state))
+      (println (str (count (:provables program)) " provables")))
     (catch Exception e (println (.getMessage e)))))

@@ -3,9 +3,10 @@
     [clojure.java.io :as io]
     [clojure.string :as s :refer [join split split-lines starts-with? trim]]
     [clojure.data.int-map :as i]
-    [mm-clj.model :refer [Program Essential Assertion Scope]]
+    [mm-clj.model]
     [taoensso.tufte :as tufte :refer [defnp profiled format-pstats]])
   (:import
+    [mm_clj.model Program Essential Assertion Scope]
     java.util.Arrays))
 
 

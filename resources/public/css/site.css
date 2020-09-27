@@ -4,7 +4,7 @@
   margin: 0 auto;
   padding-top: 72px;
   -webkit-font-smoothing: antialiased;
-  font-size: 1.125em;
+  /* font-size: 1.125em; */
   color: #333;
   line-height: 1.5em;
 }
@@ -42,10 +42,12 @@ a:hover {
 .leftpane, .rightpane {
   float: left;
   width: 25%;
+  padding: 20px;
 }
 
 .mainpane {
   float: left;
   width: 50%;
+  padding: 20px;
 }
 

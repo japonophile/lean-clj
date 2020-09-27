@@ -17,8 +17,8 @@ E.g.
     lein run mm/simple2.mm
     lein run mm/nothing2zero.mm
     lein run mm/twoplustwo.mm
-    lein run mm/lib/peano.mm
-    lein run mm/lib/set.mm
+    lein run mm/peano.mm
+    lein run mm/set.mm
 
 1. To start a web server and interactively display the content of Metamath files
 

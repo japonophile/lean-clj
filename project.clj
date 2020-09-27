@@ -7,6 +7,7 @@
                  [org.clojure/data.int-map "1.0.0"]
                  [org.clojure/math.combinatorics "0.1.6"]
                  [instaparse "1.4.10"]
+                 [progrock "0.1.2"]
                  [com.taoensso/tufte "2.1.0"]
                  [criterium "0.4.6"]
                  [ring-server "0.5.0"]
@@ -23,8 +24,7 @@
                  [pez/clerk "1.0.0"]
                  [venantius/accountant "0.2.5"
                   :exclusions [org.clojure/tools.reader]]
-                 [cljs-http "0.1.46"]
-                 [progrock "0.1.2"]]
+                 [cljs-http "0.1.46"]]
 
   :plugins [[lein-environ "1.1.0"]
             [lein-cljsbuild "1.1.7"]

@@ -31,12 +31,29 @@
     (reduce (fn [buffer token]
               (let [[label & otherwords] (split token #" ")
                     link (if (starts-with? label "http") label (str "#" label))]
-                (conj buffer " " [:a {:href link} label] " " (join " " otherwords))))
+                (conj buffer [:a {:href link} label] (join " " otherwords))))
             [:span beginning] tokens)))
 
+(defn subst-newlines
+  [tokens]
+  (reduce (fn [buffer token]
+            (if (string? token)
+              (let [paragraphs (split token #"\n\n")]
+                ; (into buffer (map #(vec [:p %]) paragraphs)))
+                (into buffer (interpose [:br] paragraphs)))
+              (conj buffer token)))
+          [(first tokens)] (rest tokens)))
+
 (defn apply-emphasis
-  [txt]
-  txt)
+  [tokens]
+  tokens)
+  ; (reduce (fn [buffer token]
+  ;           (if (string? token)
+  ;             (into buffer (s/replace txt #"_([^_ ][^_]*[^_ ])_" [:em "$1"]))
+  ;             (let [paragraphs (split token #"\n\n")]
+  ;               (into buffer (interpose [:br] paragraphs)))
+  ;             (conj buffer token)))
+  ;         (first tokens) (rest tokens)))
   ; (s/replace txt #"_([^_ ][^_]*[^_ ])_" [:em "$1"]))
 
 (defn fmt-text
@@ -44,6 +61,7 @@
   (-> txt
     (text->tex symbolmap)
     (subst-refs)
+    (subst-newlines)
     (apply-emphasis)))
 
 (defn fmt-title-desc
@@ -67,9 +85,10 @@
 
 (defn fmt-axiom
   [axiom symbolmap]
-  (let [l (:label axiom)]
+  (if-let [l (:label axiom)]
     [:div.theorem {:id l}
-     [:p [:span {:class (str "title " (name (:category axiom)))} (assertion-categ axiom)]]
+     [:p [:span {:class (str "title " (if-let [c (:category axiom)] (name c) ""))}
+          (assertion-categ axiom)]]
      (fmt-title-desc (:title axiom) (:description axiom) symbolmap)
      (when-let [essentials (vals (-> axiom :scope :essentials))]
        [:div

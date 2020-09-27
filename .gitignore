@@ -12,7 +12,6 @@ pom.xml.asc
 .hg/
 .lsp/
 *.swp
-/mm/lib/
 .clj-kondo/
 /out
 /.repl
@@ -20,3 +19,8 @@ pom.xml.asc
 /.env
 /.sass-cache
 /node_modules
+.rebel_readline_history
+/mm/peano.mm
+/mm/set.mm
+/sample.html
+/state.edn

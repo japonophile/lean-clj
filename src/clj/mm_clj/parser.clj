@@ -49,11 +49,15 @@
           (nil? l)
             s
           (starts-with? l "#*#*#*#*")
-            (conj s {:title (trim (first lines))
-                     :description (trim (join "\n" (nthrest lines 2)))
-                     :subs []})
+            (if (starts-with? (first lines) "#*#*#*#*")
+              (assoc s :title (trim (second lines)))
+              (update-in s [:sections]
+                         conj {:title (trim (first lines))
+                               :description (trim (join "\n" (nthrest lines 2)))
+                               :subs []
+                               :assertions []}))
           (starts-with? l "=-=-=-=-")
-            (update-in s [(dec (count s)) :subs]
+            (update-in s [:sections (dec (count s)) :subs]
                        conj {:title (trim (first lines))
                              :description (trim (join "\n" (nthrest lines 2)))
                              :assertions []})
@@ -221,17 +225,13 @@
 
 (defnp update-structure-add-assertion
   [state li]
-  (update-in state [:program :structure]
+  (update-in state [:program :structure :sections]
     (fn [sections]
       (let [i (dec (count sections))
             j (dec (count (:subs (get sections i))))]
         (if (<= 0 j)
           (update-in sections [i :subs j :assertions] conj li)
-          ; if no subsection, add a dummy one
-          (update-in sections [i :subs] conj
-                     {:title ""
-                      :description ""
-                      :assertions [li]}))))))
+          (update-in sections [i :assertions] conj li))))))
 
 (defnp split-title-desc
   [txt]
@@ -413,7 +413,7 @@
   (let [state (atom {:program (Program. #{} #{}
                                         {} (i/int-map) {} (i/int-map)
                                         (i/int-map) (i/int-map) (i/int-map)
-                                        [] 0 "")
+                                        {:sections []} 0 "")
                      :scope (Scope. #{} (i/int-map)
                                     (i/int-map) (i/int-map) #{}
                                     #{} [] [])

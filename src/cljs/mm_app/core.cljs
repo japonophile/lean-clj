@@ -36,6 +36,7 @@
     ["/api/mm"
      ["/" :load-mm-files]
      ["/:file-id" :load-mm-file]
+     ["/:file-id/:sec-id" :load-mm-sec]
      ["/:file-id/:sec-id/:subs-id" :load-mm-subs]]
     ["/about" :about]]))
 
@@ -67,8 +68,16 @@
 (defn load-mm-file
   [file-id]
   ; only load if not loaded yet
-  (if (nil? (get-in @state [:mm-files file-id :program]))
+  (when (nil? (get-in @state [:mm-files file-id :program]))
     (try-loading-mm-file file-id)))
+
+(defn load-mm-sec
+  [file-id sec-id]
+  (go (let [response (<! (http/get
+                           (path-for :load-mm-sec
+                                     {:file-id file-id :sec-id sec-id})))]
+        (swap! state assoc-in [:program :axioms sec-id -1]
+               (read-string (remove-record-refs (:body response)))))))
 
 (defn load-mm-subs
   [file-id sec-id subs-id]
@@ -97,13 +106,13 @@
       (let [routing-data (session/get :route)
             file-id (int (get-in routing-data [:route-params :file-id]))]
         [:span.main
-         [:h1 "Table of Contents"]
+         [:h1 (or (:title structure) "Table of Contents")]
          [:ul (map-indexed
                 (fn [sec-id section]
                   [:li {:name (str "sec-" sec-id) :key (str "sec-" sec-id)}
                    [:a {:href (path-for :section {:file-id file-id :sec-id sec-id})}
                     (:title section)]])
-                structure)]])
+                (:sections structure))]])
       (if-let [progress (:loading @state)]
         [:span.main
          [:h1 "Loading..."]
@@ -129,13 +138,17 @@
     (let [routing-data (session/get :route)
           file-id (int (get-in routing-data [:route-params :file-id]))
           sec-id (int (get-in routing-data [:route-params :sec-id]))
-          structure (-> @state :program :structure)
-          section (get structure sec-id)
+          sections (-> @state :program :structure :sections)
+          section (get sections sec-id)
           symbolmap (-> @state :program :symbolmap)]
       [:span.main
        [:p [:a {:href (path-for :index)} "Home"]]
        [:h1 (:title section)]
        [:p (fmt/fmt-text (:description section) symbolmap)]
+       (if-let [axioms (get-in @state [:program :axioms sec-id -1])]
+         [:div (fmt/format-axioms axioms symbolmap)]
+         [:a {:on-click (fn [_] (load-mm-sec file-id sec-id))}
+          (str (count (:assertions section)) " assertions.")])
        [:ul (map-indexed
               (fn [subs-id subsection]
                 [:li {:name (str "subs-" subs-id) :key (str "subs-" subs-id)}
@@ -148,8 +161,8 @@
     (let [routing-data (session/get :route)
           file-id (int (get-in routing-data [:route-params :file-id]))
           sec-id (int (get-in routing-data [:route-params :sec-id]))
-          structure (-> @state :program :structure)
-          section (get structure sec-id)
+          sections (-> @state :program :structure :sections)
+          section (get sections sec-id)
           subs-id (int (get-in routing-data [:route-params :subs-id]))
           subsection (get-in section [:subs subs-id])
           symbolmap (-> @state :program :symbolmap)]
@@ -199,7 +212,7 @@
       [:div
        [:header
         [:p [:a {:href (path-for :index)} "Home"] " | "
-         (when (= (count (get-in @state [:program :structure])) 0)
+         (when (= (count (get-in @state [:program :structure :sections])) 0)
            [:span [:a {:on-click (fn [_] (load-mm-file 0))} "Load"] " | "])
          [:a {:href (path-for :about)} "About Metamath app"]]]
        [:div.mainlayout

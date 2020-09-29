@@ -8,13 +8,45 @@
 
 (def bar (atom (pr/progress-bar 100)))
 
+(defn print-truncated
+  [txt]
+  (let [n (count txt)]
+    (when (< 0 n)
+      (if (< n 50)
+        (println (str "      " txt))
+        (println (str "      " (subs txt 0 50) "..."))))))
+
+(defn print-structure
+  [structure]
+  (println (or (:title structure) "Program structure"))
+  (loop [[section & othersections] (:sections structure)
+         i 1]
+    (when section
+      (println (str "  " i ". " (:title section)))
+      (print-truncated (:description section))
+      (let [nasserts (count (:assertions section))]
+        (when (< 0 nasserts)
+          (println (str "    " nasserts " assertions"))))
+      (loop [[subsection & othersubsections] (:subs section)
+             j 1]
+        (when subsection
+          (println (str "    " i "." j " " (:title subsection)))
+          (print-truncated (:description subsection))
+          (let [nasserts (count (:assertions subsection))]
+            (when (< 0 nasserts)
+              (println (str "      " nasserts " assertions"))))
+          (recur othersubsections (inc j))))
+      (recur othersections (inc i)))))
+
+
 (defn parse-mm
   "A Metamath parser written in Clojure. Fun everywhere!"
-  [filename]
+  [filename print-stats]
   (go
     (try
-      (let [state (p/parse-mm filename :print-stats true :progress bar)
+      (let [state (p/parse-mm filename :print-stats print-stats :progress bar)
             program (:program state)]
+        (print-structure (:structure program))
         (println (str (count (:symbols program)) " symbols"))
         (println (str (count (:constants program)) " constants"))
         (println (str (count (:variables program)) " variables"))

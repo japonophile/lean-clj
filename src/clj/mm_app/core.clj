@@ -4,6 +4,8 @@
     [mm-app.server :refer [start-server]]))
 
 (defn -main [& args]
-  (if-let [filename (first args)]
-    (parse-mm filename)
+  (if (first args)
+    (if (= "--print-stats" (first args))
+      (parse-mm (second args) true)
+      (parse-mm (first args) false))
     (start-server)))

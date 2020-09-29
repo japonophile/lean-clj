@@ -119,6 +119,24 @@
                  {:loading @progress}
                  {:loading @(load-program file-id state)})))}))
 
+(defn api-mm-sec-handler
+  [request state]
+  (let [path-params (:path-params request)
+        file-id (read-string (:file-id path-params))
+        mm (get-in @state [:mm-files file-id])]
+    {:status 200
+     :header {"Content-Type" "text/edn"}
+     :body (pr-str
+             (if-let [program (:program mm)]
+               (let [sec-id (read-string (:sec-id path-params))
+                     axiom-keys (get-in program [:structure :sections sec-id :assertions])
+                     axioms (vec (map (:axioms program) axiom-keys))
+                     axioms (map #(decode-assertion % mm) axioms)]
+                 axioms)
+               (if-let [progress (:loading mm)]
+                 {:loading @progress}
+                 {:loading @(load-program file-id state)})))}))
+
 (defn api-mm-subs-handler
   [request state]
   (let [path-params (:path-params request)
@@ -130,7 +148,8 @@
              (if-let [program (:program mm)]
                (let [sec-id (read-string (:sec-id path-params))
                      subs-id (read-string (:subs-id path-params))
-                     axiom-keys (get-in program [:structure sec-id :subs subs-id :assertions])
+                     axiom-keys (get-in program [:structure :sections sec-id
+                                                 :subs subs-id :assertions])
                      axioms (vec (map (:axioms program) axiom-keys))
                      axioms (map #(decode-assertion % mm) axioms)]
                  axioms)
@@ -175,9 +194,12 @@
            ["/:file-id"
             {:get {:handler #(api-mm-file-handler % state)
                    :parameters {:path {:file-id int?}}}}]
+           ["/:file-id/:sec-id"
+            {:get {:handler #(api-mm-sec-handler % state)
+                   :parameters {:path {:file-id int? :sec-id int?}}}}]
            ["/:file-id/:sec-id/:subs-id"
             {:get {:handler #(api-mm-subs-handler % state)
-                   :parameters {:path {:sec-id int? :subs-id int?}}}}]]]])
+                   :parameters {:path {:file-id int? :sec-id int? :subs-id int?}}}}]]]])
       (reitit-ring/routes
         (reitit-ring/create-resource-handler {:path "/" :root "/public"})
         (reitit-ring/create-default-handler))
